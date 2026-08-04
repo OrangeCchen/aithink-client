@@ -1,0 +1,73 @@
+{
+  "manifest_version": 3,
+  "name": "耀天助手",
+  "version": "0.1.0",
+  "description": "基于 AI 的产品助手：生成功规、智能阅读、对话问答",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "sidePanel",
+    "storage",
+    "tabs",
+    "clipboardWrite",
+    "clipboardRead"
+  ],
+  "optional_permissions": [],
+  "optional_host_permissions": [
+    "*://*/*"
+  ],
+  "host_permissions": [
+    "https://*.feishu.cn/*",
+    "https://*.larksuite.com/*",
+    "https://*.xfchat.iflytek.com/*",
+    "https://lanhuapp.com/*",
+    "https://*.lanhuapp.com/*",
+    "https://mastergo.com/*",
+    "https://*.mastergo.com/*",
+    "https://mastergo.iflytek.com/*",
+    "https://*.mastergo.iflytek.com/*",
+    "https://api.anthropic.com/*",
+    "https://dashscope.aliyuncs.com/*",
+    "http://localhost:18790/*",
+    "http://127.0.0.1:18790/*"
+  ],
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "耀天助手",
+    "default_popup": "src/popup/index.html"
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.feishu.cn/*",
+        "https://*.larksuite.com/*",
+        "https://*.xfchat.iflytek.com/*"
+      ],
+      "js": ["src/content/feishu.ts"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://lanhuapp.com/*",
+        "https://*.lanhuapp.com/*",
+        "https://mastergo.com/*",
+        "https://*.mastergo.com/*",
+        "https://mastergo.iflytek.com/*",
+        "https://*.mastergo.iflytek.com/*"
+      ],
+      "js": ["src/content/lanhu.ts"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "public/icons/icon-16.png",
+    "48": "public/icons/icon-48.png",
+    "128": "public/icons/icon-128.png"
+  }
+}

@@ -10,7 +10,7 @@
 - `AI_README.md`：给 AI/开发者看的代码逻辑索引、数据流、IPC/HTTP 通道和功能定位指南。
 - `CLAUDE.md`：给 Claude Code 的项目级工作约束，要求代码变更时同步检查 `README.md` 和 `AI_README.md`。
 
-后续如果修改了架构、运行命令、配置项、数据存储、IPC/HTTP API、核心功能状态或 `../prd2spec/` 联动逻辑，需要同步检查并更新 `README.md` 和 `AI_README.md`。不要只更新其中一份。
+后续如果修改了架构、运行命令、配置项、数据存储、IPC/HTTP API、核心功能状态或 `plugins/prd2spec/` 联动逻辑，需要同步检查并更新 `README.md` 和 `AI_README.md`。不要只更新其中一份。
 
 专题文档统一放在 `docs/`：
 
@@ -24,9 +24,9 @@
 这份文档只关注两部分：
 
 - 当前目录，也就是 `aithink-client/`：主产品，Electron + Vue 3 桌面 AI 客户端。
-- 相邻目录 `../prd2spec/`：配套 PRD2Spec 能力，重点是 `../prd2spec/extension/` 浏览器扩展，以及它和桌面端之间的同步链路。
+- 相邻目录 `plugins/prd2spec/`：配套 PRD2Spec 能力，重点是 `plugins/prd2spec/extension/` 浏览器扩展，以及它和桌面端之间的同步链路。
 
-本文不记录其他目录。后续新增 AIThink 桌面端功能，默认先看当前目录；只有涉及浏览器侧边栏、飞书/设计稿提取、PRD2Spec、会话同步、浏览足迹录制时，才进入 `../prd2spec/`。
+本文不记录其他目录。后续新增 AIThink 桌面端功能，默认先看当前目录；只有涉及浏览器侧边栏、飞书/设计稿提取、PRD2Spec、会话同步、浏览足迹录制时，才进入 `plugins/prd2spec/`。
 
 ## 2. 主应用技术栈
 
@@ -264,12 +264,12 @@ Qwen 依赖外部 LiteLLM 或兼容 Anthropic/OpenAI 的代理。相关文件：
 
 扩展侧相关文件：
 
-- `../prd2spec/extension/src/sidepanel/components/ChatTab.tsx`：问答侧边栏，会在回答完成后同步会话到桌面端。
-- `../prd2spec/extension/src/sidepanel/components/ReviewTab.tsx`：评审侧边栏，也同步会话。
-- `../prd2spec/extension/src/sidepanel/components/RecordingBar.tsx`：开始/停止浏览足迹录制。
-- `../prd2spec/extension/src/background/index.ts`：处理 PRD/设计稿提取、录制状态和页面上报。
-- `../prd2spec/extension/src/popup/Popup.tsx`：检查桌面端连接，并通过 `aithink://open` 唤起桌面端。
-- `../prd2spec/extension/src/sidepanel/App.tsx`：周期性请求 `/health`，用于连接状态。
+- `plugins/prd2spec/extension/src/sidepanel/components/ChatTab.tsx`：问答侧边栏，会在回答完成后同步会话到桌面端。
+- `plugins/prd2spec/extension/src/sidepanel/components/ReviewTab.tsx`：评审侧边栏，也同步会话。
+- `plugins/prd2spec/extension/src/sidepanel/components/RecordingBar.tsx`：开始/停止浏览足迹录制。
+- `plugins/prd2spec/extension/src/background/index.ts`：处理 PRD/设计稿提取、录制状态和页面上报。
+- `plugins/prd2spec/extension/src/popup/Popup.tsx`：检查桌面端连接，并通过 `aithink://open` 唤起桌面端。
+- `plugins/prd2spec/extension/src/sidepanel/App.tsx`：周期性请求 `/health`，用于连接状态。
 
 同步链路：
 
@@ -357,9 +357,9 @@ Qwen 依赖外部 LiteLLM 或兼容 Anthropic/OpenAI 的代理。相关文件：
 新增“浏览器扩展到桌面端同步”：
 
 - `electron/service/http-server.ts`
-- `../prd2spec/extension/src/sidepanel/components/ChatTab.tsx`
-- `../prd2spec/extension/src/sidepanel/components/ReviewTab.tsx`
-- `../prd2spec/extension/src/background/index.ts`
+- `plugins/prd2spec/extension/src/sidepanel/components/ChatTab.tsx`
+- `plugins/prd2spec/extension/src/sidepanel/components/ReviewTab.tsx`
+- `plugins/prd2spec/extension/src/background/index.ts`
 
 新增“浏览足迹录制”：
 
@@ -367,8 +367,8 @@ Qwen 依赖外部 LiteLLM 或兼容 Anthropic/OpenAI 的代理。相关文件：
 - `electron/controller/recording.ts`
 - `electron/service/database.ts`
 - `frontend/src/components/FootprintPanel.vue`
-- `../prd2spec/extension/src/sidepanel/components/RecordingBar.tsx`
-- `../prd2spec/extension/src/background/index.ts`
+- `plugins/prd2spec/extension/src/sidepanel/components/RecordingBar.tsx`
+- `plugins/prd2spec/extension/src/background/index.ts`
 
 接入“知识空间真实后端”：
 

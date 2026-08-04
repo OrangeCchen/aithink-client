@@ -1,0 +1,19 @@
+{
+  "name": "prd2spec-mcp-proxy",
+  "version": "0.0.1",
+  "description": "Local HTTP proxy for browser extension to call Claude Code MCP servers",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

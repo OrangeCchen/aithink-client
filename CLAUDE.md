@@ -14,7 +14,7 @@ Before making code changes, read:
   - `docs/ASR_IMPLEMENTATION_SUMMARY.md`
   - `docs/ASR_USAGE_GUIDE.md`
 
-If the task involves browser extension sync, PRD2Spec, browser side panel, Feishu/design extraction, or browsing footprint recording, also inspect the relevant files under `../prd2spec/`, especially `../prd2spec/extension/`.
+If the task involves browser extension sync, PRD2Spec, browser side panel, Feishu/design extraction, or browsing footprint recording, also inspect the relevant files under `plugins/prd2spec/`, especially `plugins/prd2spec/extension/`.
 
 ## Documentation Sync Rule
 
@@ -33,14 +33,14 @@ Update both files when a change affects:
 - IPC channels
 - local HTTP APIs
 - feature completion status
-- `../prd2spec/` integration
+- `plugins/prd2spec/` integration
 
 Do not update only one document if the same fact appears in both. If a topic document under `docs/` covers the same area, update that file too.
 
 ## Current Project Boundaries
 
 - `aithink-client/` is the main Electron + Vue 3 desktop app.
-- `../prd2spec/extension/` is the browser extension that syncs sessions and browsing footprints back to the desktop app.
+- `plugins/prd2spec/extension/` is the browser extension that syncs sessions and browsing footprints back to the desktop app.
 - Other sibling directories are outside this project's normal implementation scope unless the user explicitly asks about them.
 
 ## Implementation Notes

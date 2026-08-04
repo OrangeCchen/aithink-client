@@ -8,7 +8,7 @@
 - `AI_README.md`：给 AI/开发者看的代码逻辑索引、数据流、IPC/HTTP 通道和功能定位指南。
 - `CLAUDE.md`：给 Claude Code 的项目级工作约束，要求代码变更时同步检查 `README.md` 和 `AI_README.md`。
 
-后续如果修改了架构、运行命令、配置项、数据存储、IPC/HTTP API、核心功能状态或 `../prd2spec/` 联动逻辑，需要同步检查并更新这两份文档。
+后续如果修改了架构、运行命令、配置项、数据存储、IPC/HTTP API、核心功能状态或 `plugins/prd2spec/` 联动逻辑，需要同步检查并更新这两份文档。
 
 专题文档统一放在 `docs/`：
 

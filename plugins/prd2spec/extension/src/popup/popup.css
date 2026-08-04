@@ -1,0 +1,270 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 340px;
+  min-height: 280px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #ffffff;
+  color: #18181b;
+}
+
+.popup-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+/* Header */
+.popup-header {
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid #ececef;
+}
+
+.logo-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo-image {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+
+.logo-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: #18181b;
+  letter-spacing: -0.01em;
+}
+
+/* Body */
+.popup-body {
+  padding: 12px 16px 16px;
+}
+
+/* Status Card */
+.status-card {
+  background: #fafafa;
+  border: 1px solid #ececef;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.status-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #52525b;
+  font-weight: 500;
+}
+
+.status-icon {
+  color: #71717a;
+}
+
+.status-value {
+  font-size: 12px;
+}
+
+.status-checking {
+  color: #a1a1aa;
+}
+
+.status-connected,
+.status-disconnected {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.status-connected {
+  color: #10b981;
+}
+
+.status-disconnected {
+  color: #a1a1aa;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #d4d4d8;
+}
+
+.status-dot.active {
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+}
+
+.status-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: #fff7ed;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #ea580c;
+}
+
+.status-hint svg {
+  flex-shrink: 0;
+}
+
+.recording-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 4px 10px;
+  background: #fef2f2;
+  border-radius: 12px;
+  font-size: 11px;
+  color: #dc2626;
+  font-weight: 500;
+}
+
+.recording-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Action List */
+.action-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.action-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #ececef;
+  border-radius: 10px;
+  background: #ffffff;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.action-item:hover:not(:disabled) {
+  background: #fafafa;
+  border-color: #e4e4e7;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.action-item:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.action-item.secondary {
+  background: #fafafa;
+}
+
+.action-item.secondary:hover:not(:disabled) {
+  background: #f5f5f7;
+}
+
+.action-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.action-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 8px;
+  flex-shrink: 0;
+  color: #52525b;
+}
+
+.action-item.secondary .action-icon {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.action-content {
+  flex: 1;
+}
+
+.action-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: inherit;
+  margin-bottom: 2px;
+}
+
+.action-desc {
+  font-size: 11px;
+  color: #a1a1aa;
+}
+
+/* Footer */
+.popup-footer {
+  padding: 8px 16px 12px;
+  border-top: 1px solid #ececef;
+  display: flex;
+  justify-content: center;
+}
+
+.footer-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #71717a;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.footer-link:hover {
+  background: #f5f5f7;
+  color: #52525b;
+}
+
+.footer-link svg {
+  flex-shrink: 0;
+}

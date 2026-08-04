@@ -11,6 +11,6 @@ When changing AIThink product behavior or engineering structure, check whether b
 - `AI_README.md` is the AI/developer-facing code map, data-flow guide, and feature-location index.
 - Topic-specific docs live under `docs/`.
 
-Update both files when a change affects architecture, run commands, dependencies, configuration, data storage, IPC channels, local HTTP APIs, model/provider behavior, feature completion status, or `../prd2spec/` integration.
+Update both files when a change affects architecture, run commands, dependencies, configuration, data storage, IPC channels, local HTTP APIs, model/provider behavior, feature completion status, or `plugins/prd2spec/` integration.
 
 Do not update only one doc if the same fact is represented in both. If a topic doc under `docs/` covers the same area, update that file too.
