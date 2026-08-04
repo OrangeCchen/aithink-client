@@ -1,0 +1,1 @@
+- [File Transcription Plan](file-transcription-plan.md) — paused: local Whisper (ggml) for file transcribe + speaker-grouped results page w/ summary+mindmap; runtime approach still to probe

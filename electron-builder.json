@@ -1,0 +1,29 @@
+{
+  "appId": "com.yaotian.aithink",
+  "productName": "AIThink",
+  "directories": {
+    "output": "out"
+  },
+  "files": [
+    "dist-electron/**/*",
+    "frontend/dist/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "resources/official-skills",
+      "to": "official-skills"
+    }
+  ],
+  "mac": {
+    "category": "public.app-category.productivity",
+    "target": ["dmg", "zip"]
+  },
+  "win": {
+    "target": ["nsis"]
+  },
+  "linux": {
+    "target": ["AppImage", "deb"],
+    "category": "Utility"
+  }
+}

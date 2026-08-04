@@ -1,0 +1,25 @@
+node_modules
+dist
+dist-electron
+dist-renderer
+out
+*.log
+.DS_Store
+.vscode
+.idea
+*.db
+*.db-shm
+*.db-wal
+.env
+
+# Python (sidecar)
+venv
+.venv
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+
+# TS build info
+*.tsbuildinfo

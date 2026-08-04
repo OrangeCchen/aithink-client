@@ -1,0 +1,62 @@
+model_list:
+  # 最新版本号型号
+  - model_name: qwen3.8-max
+    litellm_params:
+      model: dashscope/qwen3.8-max
+      api_key: os.environ/DASHSCOPE_API_KEY
+      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+  - model_name: qwen3.7-max
+    litellm_params:
+      model: dashscope/qwen3.7-max
+      api_key: os.environ/DASHSCOPE_API_KEY
+      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+  - model_name: qwen3.7-plus
+    litellm_params:
+      model: dashscope/qwen3.7-plus
+      api_key: os.environ/DASHSCOPE_API_KEY
+      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+  - model_name: qwen3.6-flash
+    litellm_params:
+      model: dashscope/qwen3.6-flash
+      api_key: os.environ/DASHSCOPE_API_KEY
+      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+  # 滚动别名（始终指向最新稳定版本）
+  - model_name: qwen-plus
+    litellm_params:
+      model: dashscope/qwen-plus
+      api_key: os.environ/DASHSCOPE_API_KEY
+      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+  - model_name: qwen-flash
+    litellm_params:
+      model: dashscope/qwen-flash
+      api_key: os.environ/DASHSCOPE_API_KEY
+      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+  - model_name: qwen-max
+    litellm_params:
+      model: dashscope/qwen-max
+      api_key: os.environ/DASHSCOPE_API_KEY
+      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+  - model_name: qwen-turbo
+    litellm_params:
+      model: dashscope/qwen-turbo
+      api_key: os.environ/DASHSCOPE_API_KEY
+      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+  - model_name: qwen3-coder-plus
+    litellm_params:
+      model: dashscope/qwen3-coder-plus
+      api_key: os.environ/DASHSCOPE_API_KEY
+      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  master_key: sk-aithink-local
