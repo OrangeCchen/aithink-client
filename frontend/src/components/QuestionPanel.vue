@@ -91,6 +91,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue';
+import { ElMessage } from 'element-plus';
 import { useQuestionStore } from '@/stores/question';
 import type { AskUserQuestionItem } from '@shared/types';
 
@@ -174,11 +175,13 @@ const buildAnswers = (): Record<string, string> => {
 };
 
 const onSubmit = async () => {
-  await questionStore.submitAnswers(buildAnswers());
+  const ok = await questionStore.submitAnswers(buildAnswers());
+  if (ok) ElMessage.success('已提交，Agent 继续处理中…');
 };
 
 const onAiDecide = async () => {
-  await questionStore.submitAiDecide();
+  const ok = await questionStore.submitAiDecide();
+  if (ok) ElMessage.success('已交给 Agent 自行决定，继续处理中…');
 };
 </script>
 

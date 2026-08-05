@@ -37,19 +37,19 @@
               placeholder="sk-..."
               show-password
             />
-            <div class="form-hint">阿里云百炼或自建代理的 API Key</div>
+            <div class="form-hint">阿里云百炼 DashScope API Key（sk-...）</div>
           </el-form-item>
           <el-form-item label="Base URL">
             <el-input
               v-model="config.qwen.baseUrl"
-              placeholder="http://localhost:8000"
+              placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
             >
               <template #append>
                 <el-button @click="testConnection" :loading="testing">测试连接</el-button>
               </template>
             </el-input>
             <div class="form-hint">
-              需要支持 Anthropic /v1/messages 格式的网关(LiteLLM/claude-code-proxy)
+              OpenAI 兼容接口。默认直连 DashScope；也可填自建兼容网关。
             </div>
             <el-alert
               v-if="connectionStatus"
@@ -68,34 +68,8 @@
         </el-form>
       </el-tab-pane>
 
-      <el-tab-pane label="阿里云语音" name="dashscope">
-        <el-form label-width="100px">
-          <el-form-item label="API Key">
-            <el-input
-              v-model="config.dashscopeAsr.apiKey"
-              type="password"
-              placeholder="sk-..."
-              show-password
-            />
-            <div class="form-hint">阿里云百炼(DashScope) API Key，用于实时语音识别</div>
-          </el-form-item>
-          <el-form-item label="识别模型">
-            <el-select v-model="config.dashscopeAsr.model" style="width: 100%">
-              <el-option label="Paraformer 实时 (paraformer-realtime-v2)" value="paraformer-realtime-v2" />
-              <el-option label="Fun-ASR 实时 (fun-asr-realtime)" value="fun-asr-realtime" />
-              <el-option label="Qwen-Audio 实时 (qwen-audio-3.0-asr-flash-streaming)" value="qwen-audio-3.0-asr-flash-streaming" />
-            </el-select>
-            <div class="form-hint">默认 Paraformer；中文场景通用，支持 16kHz 单声道流式识别</div>
-          </el-form-item>
-          <el-form-item label="说话人分离">
-            <el-switch v-model="config.dashscopeAsr.diarizationEnabled" />
-            <div class="form-hint">多人对话时开启，自动区分说话人；单人场景请关闭（否则可能影响识别质量）</div>
-          </el-form-item>
-        </el-form>
-      </el-tab-pane>
-
       <el-tab-pane label="通用" name="general">
-        <el-form label-width="100px">
+        <el-form label-width="110px">
           <el-form-item label="默认模型">
             <el-select v-model="config.defaultModel" style="width: 100%">
               <el-option
@@ -105,6 +79,18 @@
                 :value="m.value"
               />
             </el-select>
+          </el-form-item>
+          <el-form-item label="最近目录">
+            <div class="path-row">
+              <el-input
+                v-model="defaultWorkspacePath"
+                placeholder="侧栏「最近」使用的工作目录"
+              />
+              <el-button @click="browseDefaultWorkspace">浏览…</el-button>
+            </div>
+            <div class="form-hint">
+              侧栏「最近」下任务的默认工作文件夹；更改后新任务与该空间下已有任务都会写到此目录。
+            </div>
           </el-form-item>
         </el-form>
       </el-tab-pane>
@@ -123,12 +109,16 @@
 import { ref, computed } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useModelStore } from '@/stores/model';
+import { useSpaceStore } from '@/stores/space';
+import { useChatStore } from '@/stores/chat';
 import type { AppConfig } from '@shared/types';
 import { DEFAULT_CONFIG } from '@shared/types';
 
 const visible = defineModel<boolean>({ default: false });
 
 const modelStore = useModelStore();
+const spaceStore = useSpaceStore();
+const chatStore = useChatStore();
 const availableModels = computed(() => modelStore.availableModels);
 
 const activeTab = ref('claude');
@@ -136,14 +126,28 @@ const saving = ref(false);
 const testing = ref(false);
 const connectionStatus = ref<{ type: 'success' | 'error', message: string, help?: string } | null>(null);
 const config = ref<AppConfig>(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
+const defaultWorkspacePath = ref('');
 
 const handleOpen = async () => {
   try {
     const loaded = await window.electronAPI.invoke('config:get');
     config.value = loaded;
     connectionStatus.value = null;
+    await spaceStore.loadSpaces();
+    defaultWorkspacePath.value = spaceStore.defaultSpace?.folderPath || '';
   } catch (error) {
     console.error('加载配置失败:', error);
+  }
+};
+
+const browseDefaultWorkspace = async () => {
+  try {
+    const result = await window.electronAPI.invoke('dialog:open-folder');
+    if (!result || result.canceled || !result.filePaths?.length) return;
+    defaultWorkspacePath.value = result.filePaths[0] as string;
+  } catch (err) {
+    console.error(err);
+    ElMessage.error('选择文件夹失败');
   }
 };
 
@@ -151,28 +155,34 @@ const testConnection = async () => {
   testing.value = true;
   connectionStatus.value = null;
   try {
-    const response = await fetch(`${config.value.qwen.baseUrl}/health`);
+    const base = config.value.qwen.baseUrl.replace(/\/+$/, '');
+    const url = base.endsWith('/v1') ? `${base}/models` : `${base}/v1/models`;
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${config.value.qwen.apiKey || 'empty'}`
+      }
+    });
     if (response.ok) {
       connectionStatus.value = {
         type: 'success',
-        message: '连接成功！代理服务运行正常'
+        message: '连接成功！OpenAI 兼容接口可用'
       };
     } else {
+      const body = await response.text().catch(() => '');
       connectionStatus.value = {
         type: 'error',
-        message: '连接失败',
-        help: '服务响应异常，请检查配置'
+        message: `连接失败 HTTP ${response.status}`,
+        help: body.slice(0, 200) || '请检查 Base URL 与 API Key'
       };
     }
   } catch (error: any) {
     connectionStatus.value = {
       type: 'error',
       message: `无法连接到 ${config.value.qwen.baseUrl}`,
-      help: `请确保 LiteLLM 代理已启动：
-
-1. 在项目根目录运行: ./start-litellm.sh
-2. 或使用 Docker: docker run -p 8000:8000 ...
-3. 或切换到 Claude 模型（在"通用"标签页）`
+      help: `请确认：
+1. API Key 已填写（百炼控制台）
+2. Base URL 为 https://dashscope.aliyuncs.com/compatible-mode/v1
+3. 网络可访问阿里云`
     };
   } finally {
     testing.value = false;
@@ -184,6 +194,20 @@ const handleSave = async () => {
   try {
     await window.electronAPI.invoke('config:set', JSON.parse(JSON.stringify(config.value)));
     modelStore.setModel(config.value.defaultModel);
+
+    const nextPath = defaultWorkspacePath.value.trim();
+    const def = spaceStore.defaultSpace;
+    if (def && nextPath && nextPath !== def.folderPath) {
+      const result = await spaceStore.updateSpaceFolder(def.id, nextPath);
+      if (!result?.success) {
+        ElMessage.error(result?.error || '更新最近目录失败');
+        return;
+      }
+      if (chatStore.spaceId === def.id || !chatStore.spaceId) {
+        chatStore.setSpace(def.id, nextPath);
+      }
+    }
+
     ElMessage.success('配置已保存');
     visible.value = false;
   } catch (error: any) {
@@ -200,6 +224,16 @@ const handleSave = async () => {
   font-size: 12px;
   color: #9ca3af;
   line-height: 1.4;
+}
+
+.path-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.path-row .el-input {
+  flex: 1;
 }
 
 :deep(.el-dialog__body) {

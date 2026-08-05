@@ -146,6 +146,9 @@ const sendMessage = async (prompt: string) => {
         if (event.type === 'text_delta') {
           streamBuffer.value += event.data.delta || '';
           scrollToBottom();
+        } else if (event.type === 'text_replace') {
+          streamBuffer.value = event.data.delta || '';
+          scrollToBottom();
         } else if (event.type === 'done') {
           const assistantMessage: Message = {
             id: Date.now().toString(),

@@ -1,1 +1,1 @@
-- [File Transcription Plan](file-transcription-plan.md) — paused: local Whisper (ggml) for file transcribe + speaker-grouped results page w/ summary+mindmap; runtime approach still to probe
+- 本地文件转写已重建：Whisper GGML 子进程 + FFmpeg 格式转换 + 可编辑全文/历史 + Qwen/Claude 结构化会议纪要；实时 ASR 已删除。说话人分离仍为后续能力。

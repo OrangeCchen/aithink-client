@@ -1,5 +1,8 @@
 #!/bin/bash
-# 启动 LiteLLM 代理,把 Anthropic /v1/messages 协议转发到 DashScope OpenAI 协议
+# [可选/遗留] LiteLLM 代理：Anthropic /v1/messages → DashScope OpenAI 协议
+#
+# 注意：AIThink 默认已改为自研 AgentRuntime 直连 DashScope / Anthropic，
+# 一般不再需要本脚本。仅在你仍想用旧的 Claude Agent SDK 兼容路径时使用。
 #
 # 用法:
 #   1. cp .env.example .env

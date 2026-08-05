@@ -11,8 +11,6 @@ Before making code changes, read:
 - `docs/` for topic-specific documentation:
   - `docs/DEVELOPMENT.md`
   - `docs/FEATURE_REQUIREMENTS.md`
-  - `docs/ASR_IMPLEMENTATION_SUMMARY.md`
-  - `docs/ASR_USAGE_GUIDE.md`
 
 If the task involves browser extension sync, PRD2Spec, browser side panel, Feishu/design extraction, or browsing footprint recording, also inspect the relevant files under `plugins/prd2spec/`, especially `plugins/prd2spec/extension/`.
 
@@ -48,4 +46,4 @@ Do not update only one document if the same fact appears in both. If a topic doc
 - Renderer code should use the preload bridge and IPC; do not call Node/Electron/Agent SDK directly from Vue components.
 - New desktop backend capabilities usually need shared types, an Electron controller/service, registration in `electron/main.ts`, and a frontend store/composable.
 - The current data store is JSON via `electron/service/database.ts`, not SQLite.
-- ASR handlers are registered (`registerASRHandlers()` in `electron/main.ts`) and the code/UI remain, but the sherpa-onnx streaming model (`resources/models/zh-streaming/`) and the `sherpa-onnx-node` dependency were REMOVED (poor accuracy). `asr-service.ts` lazy-loads sherpa via `loadSherpa()`, so the app still boots; ASR only throws when actually invoked. `electron/types/sherpa-onnx-node.d.ts` is kept so tsc still compiles. To re-enable ASR: `npm i sherpa-onnx-node` + provide a model, or wire a different engine (e.g. Whisper — `ggml-large-v3-turbo.bin` sits in `aithink/models/`).
+- Real-time ASR was removed. File transcription is local-only: `registerTranscriptionHandlers()` orchestrates FFmpeg conversion and a cancellable Whisper child process. The user selects a GGML model path in the file-transcription page; meeting minutes use the configured Qwen/Claude provider. Do not reintroduce microphone capture or `asr:*` IPC when extending this flow.

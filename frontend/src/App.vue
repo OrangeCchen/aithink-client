@@ -8,17 +8,12 @@
         @mousedown="startResize('sidebar', $event)"
       ></div>
 
-      <!-- 知识空间：占满中间+右侧区域 -->
-      <KnowledgeSpaceView v-if="activeView === 'knowledge'" :style="{ flex: '1' }" />
+      <!-- 用 v-show 保活视图，避免切换时整页卸载闪现 -->
+      <KnowledgeSpaceView v-show="activeView === 'knowledge'" :style="{ flex: '1' }" />
+      <FileTranscriptionView v-show="activeView === 'transcription'" :style="{ flex: '1' }" />
+      <SkillMarketView v-show="activeView === 'skill'" :style="{ flex: '1' }" />
 
-      <!-- 语音转写：占满中间+右侧区域 -->
-      <ASRTranscription v-else-if="activeView === 'asr'" :style="{ flex: '1' }" />
-
-      <!-- 技能市场：占满中间+右侧区域 -->
-      <SkillMarketView v-else-if="activeView === 'skill'" :style="{ flex: '1' }" />
-
-      <!-- 对话视图 -->
-      <template v-else>
+      <template v-if="activeView === 'chat'">
         <ChatView :style="{ flex: '1' }" />
         <div
           class="resize-handle resize-handle-right"
@@ -36,9 +31,10 @@ import TitleBar from './components/TitleBar.vue';
 import Sidebar from './components/Sidebar.vue';
 import ChatView from './views/ChatView.vue';
 import KnowledgeSpaceView from './views/KnowledgeSpaceView.vue';
-import ASRTranscription from './views/ASRTranscription.vue';
+import FileTranscriptionView from './views/FileTranscriptionView.vue';
 import SkillMarketView from './views/SkillMarketView.vue';
 import RightPanel from './components/RightPanel.vue';
+import { bootstrapFileTranscription } from './composables/useFileTranscription';
 import { useModelStore } from './stores/model';
 import { useUiStore } from './stores/ui';
 
@@ -97,6 +93,7 @@ const stopResize = () => {
 
 onMounted(() => {
   modelStore.loadFromConfig();
+  void bootstrapFileTranscription();
 });
 </script>
 
@@ -116,6 +113,12 @@ onMounted(() => {
   overflow: hidden;
   background: var(--color-bg);
   position: relative;
+}
+
+.main-layout > :deep(.tx-page),
+.main-layout > :deep(.knowledge-space),
+.main-layout > :deep(.skill-market) {
+  min-width: 0;
 }
 
 .resize-handle {

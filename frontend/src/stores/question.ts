@@ -55,7 +55,7 @@ export const useQuestionStore = defineStore('question', {
           aiDecide: false
         });
         if (!result?.success) {
-          this.error = result?.error || '提交失败';
+          this.error = result?.error || '提交失败：Agent 侧没有等待中的提问（可能已取消或主进程已重启）';
           return false;
         }
         this.clear();
@@ -80,7 +80,7 @@ export const useQuestionStore = defineStore('question', {
           aiDecide: true
         });
         if (!result?.success) {
-          this.error = result?.error || '提交失败';
+          this.error = result?.error || '提交失败：Agent 侧没有等待中的提问（可能已取消或主进程已重启）';
           return false;
         }
         this.clear();

@@ -1,26 +1,11 @@
 <template>
   <div class="input-bar">
-    <!-- 工作空间显示 -->
-    <div v-if="workspacePath" class="workspace-info">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8">
-        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-      </svg>
-      <span class="workspace-path" :title="workspacePath">{{ displayWorkspacePath }}</span>
-      <button class="workspace-btn" @click="handleChangeWorkspace" title="更改工作空间">
-        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-        </svg>
-      </button>
-    </div>
-    <div v-else class="workspace-info empty">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8">
-        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-      </svg>
-      <span class="workspace-placeholder">未设置工作空间</span>
-      <button class="workspace-btn primary" @click="handleChangeWorkspace" title="选择工作空间">
-        <span>选择</span>
-      </button>
+    <!-- 等待外部任务时的引导：任务完成后自动消失 -->
+    <div v-if="isWaitingExternalTasks" class="waiting-hint">
+      <span class="waiting-text">
+        💡 任务在后台执行，您可以新建对话继续其他工作
+      </span>
+      <button class="waiting-action" @click="handleNewSession">新建对话</button>
     </div>
 
     <div class="input-container">
@@ -43,13 +28,77 @@
         v-model="inputText"
         type="textarea"
         :autosize="{ minRows: 1, maxRows: 8 }"
-        placeholder="继续对话...（输入 / 调用已安装技能）"
+        :placeholder="inputPlaceholder"
         @input="onInput"
+        @paste="handlePaste"
         @keydown.enter.exact.prevent="handleSend"
-        :disabled="streaming"
+        :disabled="streaming || isWaitingExternalTasks"
       />
+
+      <!-- 图片预览区 -->
+      <div v-if="pastedImages.length > 0" class="image-previews">
+        <div
+          v-for="(imgUrl, index) in pastedImages"
+          :key="index"
+          class="image-preview-item"
+        >
+          <img :src="imgUrl" alt="pasted image" />
+          <button class="image-remove" @click="removeImage(index)" title="删除">×</button>
+        </div>
+      </div>
+
       <div class="input-toolbar">
         <div class="toolbar-left">
+          <!-- 选择空间 -->
+          <div class="space-picker" ref="spacePickerRef">
+            <button class="space-trigger" @click="toggleSpaceMenu" :title="activeSpacePath">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+              </svg>
+              <span class="space-trigger-label">{{ activeSpaceLabel }}</span>
+              <svg class="caret" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+            <div v-if="spaceMenuOpen" class="space-menu">
+              <div class="space-search">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="7"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input
+                  v-model="spaceQuery"
+                  type="text"
+                  placeholder="搜索空间"
+                  @mousedown.stop
+                />
+              </div>
+              <div class="space-menu-list">
+                <button
+                  v-for="space in filteredSpaces"
+                  :key="space.id"
+                  class="space-option"
+                  :class="{ active: space.id === activeSpaceId }"
+                  @mousedown.prevent="selectSpace(space.id)"
+                >
+                  <svg class="opt-folder" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                  <span class="space-option-name">{{ spaceDisplayName(space) }}</span>
+                </button>
+                <div v-if="filteredSpaces.length === 0" class="space-empty">无匹配空间</div>
+              </div>
+              <div class="space-menu-divider"></div>
+              <button class="space-option action" @mousedown.prevent="browseAndCreateSpace">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                <span class="space-option-name">新建空间</span>
+              </button>
+            </div>
+          </div>
+
           <el-select v-model="selectedModel" size="small" class="model-select">
             <el-option
               v-for="model in availableModels"
@@ -72,10 +121,21 @@
           </button>
         </div>
         <button
+          v-if="streaming"
+          class="stop-btn"
+          @click="handleStop"
+          title="终止任务"
+        >
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+            <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+          </svg>
+        </button>
+        <button
+          v-else
           class="send-btn"
           @click="handleSend"
-          :disabled="!inputText.trim() || streaming"
-          :title="streaming ? '发送中...' : '发送 (Enter)'"
+          :disabled="!inputText.trim()"
+          title="发送 (Enter)"
         >
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="22" y1="2" x2="11" y2="13"></line>
@@ -88,20 +148,147 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useChatStore } from '@/stores/chat';
 import { useModelStore } from '@/stores/model';
 import { useSkillStore } from '@/stores/skill';
+import { useSpaceStore } from '@/stores/space';
 import { ElMessage } from 'element-plus';
 
 const chatStore = useChatStore();
 const modelStore = useModelStore();
 const skillStore = useSkillStore();
+const spaceStore = useSpaceStore();
 
 const inputText = ref('');
 const textareaRef = ref();
+const spaceMenuOpen = ref(false);
+const spaceQuery = ref('');
+const spacePickerRef = ref<HTMLElement | null>(null);
+// 粘贴的图片（base64 data URL）
+const pastedImages = ref<string[]>([]);
 
-// 斜杠命令：调用已安装技能
+// 只锁当前会话的输入；别的会话在跑不影响这里
+const streaming = computed(() => chatStore.isStreamingActiveSession);
+// 等待中的任务也只看当前会话
+const sessionPendingTasks = computed(() =>
+  chatStore.externalTasks.filter(
+    (t) =>
+      t.sessionId === chatStore.currentSessionId &&
+      (t.status === 'queued' || t.status === 'running')
+  )
+);
+const isWaitingExternalTasks = computed(() => sessionPendingTasks.value.length > 0);
+const waitingTasksCount = computed(() => {
+  const total = chatStore.externalTasks.filter(
+    (t) => t.sessionId === chatStore.currentSessionId
+  ).length;
+  const pending = sessionPendingTasks.value.length;
+  return { pending, completed: total - pending, total };
+});
+
+/** 新建对话：任务在后台继续跑，这里只切出一个干净会话 */
+const handleNewSession = () => {
+  chatStore.clearSession();
+  ElMessage.success('已创建新对话');
+};
+
+/** 监听粘贴事件，提取图片 */
+const handlePaste = (event: ClipboardEvent) => {
+  const items = event.clipboardData?.items;
+  if (!items) return;
+
+  for (const item of Array.from(items)) {
+    if (item.type.startsWith('image/')) {
+      event.preventDefault();
+      const file = item.getAsFile();
+      if (!file) continue;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string;
+        if (dataUrl) {
+          pastedImages.value.push(dataUrl);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  }
+};
+
+/** 移除某张图片 */
+const removeImage = (index: number) => {
+  pastedImages.value.splice(index, 1);
+};
+
+const inputPlaceholder = computed(() => {
+  if (isWaitingExternalTasks.value) {
+    const { pending, completed, total } = waitingTasksCount.value;
+    return `⏳ 等待外部任务 (${completed}/${total} 已完成，${pending} 进行中)`;
+  }
+  return '今天帮你做些什么？/ 调用已安装技能';
+});
+
+const spaces = computed(() => spaceStore.spaces);
+const activeSpaceId = computed(() => spaceStore.activeSpaceId || chatStore.spaceId);
+const spaceDisplayName = (space: { name: string; isDefault?: boolean }) =>
+  space.isDefault ? '选择工作空间' : space.name;
+const filteredSpaces = computed(() => {
+  const q = spaceQuery.value.trim().toLowerCase();
+  if (!q) return spaces.value;
+  return spaces.value.filter((s) => spaceDisplayName(s).toLowerCase().includes(q) || s.name.toLowerCase().includes(q));
+});
+const activeSpaceLabel = computed(() => {
+  const s = spaces.value.find((x) => x.id === activeSpaceId.value) || spaceStore.activeSpace;
+  if (!s) return '选择工作空间';
+  return spaceDisplayName(s);
+});
+const activeSpacePath = computed(() => {
+  const s = spaces.value.find((x) => x.id === activeSpaceId.value) || spaceStore.activeSpace;
+  return s?.folderPath || chatStore.workspacePath || '';
+});
+
+const toggleSpaceMenu = () => {
+  spaceMenuOpen.value = !spaceMenuOpen.value;
+  if (spaceMenuOpen.value) spaceQuery.value = '';
+};
+
+const selectSpace = (spaceId: string) => {
+  const space = spaces.value.find((s) => s.id === spaceId);
+  if (!space) return;
+  spaceStore.setActiveSpace(space.id);
+  chatStore.setSpace(space.id, space.folderPath);
+  spaceMenuOpen.value = false;
+};
+
+const browseAndCreateSpace = async () => {
+  spaceMenuOpen.value = false;
+  try {
+    const result = await window.electronAPI.invoke('dialog:open-folder');
+    if (!result || result.canceled || !result.filePaths?.length) return;
+    const folderPath = result.filePaths[0] as string;
+    const defaultName = folderPath.split(/[/\\]/).filter(Boolean).pop() || '新空间';
+    const name = window.prompt('空间名称', defaultName);
+    if (name === null) return;
+    const space = await spaceStore.createSpace(name.trim() || defaultName, folderPath);
+    if (space) {
+      chatStore.setSpace(space.id, space.folderPath);
+      ElMessage.success(`已切换到「${space.name}」`);
+    }
+  } catch (err) {
+    console.error(err);
+    ElMessage.error('创建空间失败');
+  }
+};
+
+const onDocClick = (e: MouseEvent) => {
+  if (!spaceMenuOpen.value) return;
+  const el = spacePickerRef.value;
+  if (el && !el.contains(e.target as Node)) {
+    spaceMenuOpen.value = false;
+  }
+};
+
 const showSlashMenu = ref(false);
 const slashQuery = ref('');
 const installedSkills = computed(() => skillStore.installed);
@@ -116,7 +303,6 @@ const filteredSlashSkills = computed(() => {
   );
 });
 
-// 回填待处理输入（从技能市场"立即使用"跳转而来）
 const applyPendingInput = () => {
   const pending = chatStore.consumePendingInput();
   if (pending) {
@@ -135,7 +321,6 @@ const focusTextarea = () => {
   }, 100);
 };
 
-// 输入变化时检测行首斜杠命令
 const onInput = () => {
   const text = inputText.value;
   const match = /(?:^|\n)\/([^\s/]*)$/.exec(text);
@@ -147,7 +332,6 @@ const onInput = () => {
   }
 };
 
-// 选择技能：把行首的 /xxx 替换为调用提示（必须用 frontmatter skillName）
 const selectSlashSkill = (skill: { name: string; slug: string; skillName?: string }) => {
   const id = skill.skillName || skill.slug;
   const prompt =
@@ -167,11 +351,14 @@ watch(() => chatStore.pendingInput, (val) => {
 });
 
 onMounted(() => {
-  // 确保已安装技能列表可用于斜杠命令
-  if (skillStore.installed.length === 0) {
-    skillStore.loadInstalled();
-  }
+  if (skillStore.installed.length === 0) skillStore.loadInstalled();
+  if (spaceStore.spaces.length === 0) spaceStore.loadSpaces();
   applyPendingInput();
+  document.addEventListener('mousedown', onDocClick);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('mousedown', onDocClick);
 });
 
 const selectedModel = computed({
@@ -180,27 +367,20 @@ const selectedModel = computed({
 });
 
 const availableModels = computed(() => modelStore.availableModels);
-const streaming = computed(() => chatStore.streaming);
-const workspacePath = computed(() => chatStore.workspacePath);
-
-// 显示工作空间路径（缩短显示）
-const displayWorkspacePath = computed(() => {
-  if (!workspacePath.value) return '';
-  const path = workspacePath.value;
-  // 如果路径过长，只显示最后两层
-  const parts = path.split(/[/\\]/);
-  if (parts.length > 3) {
-    return '.../' + parts.slice(-2).join('/');
-  }
-  return path;
-});
 
 const handleSend = async () => {
   const text = inputText.value.trim();
   if (!text || streaming.value) return;
-
-  await chatStore.sendMessage(text, selectedModel.value);
+  const images = pastedImages.value.length > 0 ? [...pastedImages.value] : undefined;
+  await chatStore.sendMessage(text, selectedModel.value, images);
   inputText.value = '';
+  pastedImages.value = [];
+};
+
+const handleStop = async () => {
+  if (!streaming.value) return;
+  await chatStore.cancelStreaming();
+  ElMessage.info('已终止任务');
 };
 
 const handleAttachment = () => {
@@ -211,41 +391,16 @@ const handleVoice = () => {
   ElMessage.info('语音输入开发中...');
 };
 
-const handleChangeWorkspace = async () => {
-  try {
-    // 调用 Electron 文件夹选择对话框
-    const result = await window.electronAPI.invoke('dialog:open-folder');
-    if (result && !result.canceled && result.filePaths.length > 0) {
-      const selectedPath = result.filePaths[0];
-      chatStore.setWorkspacePath(selectedPath);
-      ElMessage.success('工作空间已更新');
-    }
-  } catch (error) {
-    console.error('Failed to select workspace:', error);
-    ElMessage.error('选择工作空间失败');
-  }
-};
-
-// 暴露方法供外部调用
 const appendText = (text: string) => {
   if (inputText.value) {
     inputText.value += '\n' + text;
   } else {
     inputText.value = text;
   }
-  // 聚焦到输入框
-  setTimeout(() => {
-    const textarea = textareaRef.value?.$el?.querySelector('textarea');
-    if (textarea) {
-      textarea.focus();
-      textarea.scrollTop = textarea.scrollHeight;
-    }
-  }, 100);
+  focusTextarea();
 };
 
-defineExpose({
-  appendText
-});
+defineExpose({ appendText });
 </script>
 
 <style scoped>
@@ -254,70 +409,88 @@ defineExpose({
   background: var(--color-bg);
 }
 
-/* 工作空间信息 */
-.workspace-info {
+/* 等待外部任务时的引导条 */
+.waiting-hint {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
   padding: 8px 12px;
-  margin-bottom: 12px;
-  background: var(--color-bg-subtle);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  font-size: var(--font-sm);
-  color: var(--color-text-secondary);
+  background: #f2f7ff;
+  border: 1px solid #dbe9ff;
+  border-radius: var(--radius-md, 8px);
 }
 
-.workspace-info svg {
+.waiting-text {
+  font-size: 12px;
+  color: #1a5fb4;
+}
+
+.waiting-action {
   flex-shrink: 0;
-  color: var(--color-text-tertiary);
+  padding: 4px 12px;
+  font-size: 12px;
+  color: #fff;
+  background: #3b82f6;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease;
 }
 
-.workspace-path {
-  flex: 1;
-  font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+.waiting-action:hover {
+  background: #2563eb;
+}
+
+.waiting-action:hover {
+  background: #2563eb;
+}
+
+/* 图片预览区 */
+.image-previews {
+  display: flex;
+  gap: 8px;
+  padding: 8px 0;
+  flex-wrap: wrap;
+}
+
+.image-preview-item {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: 6px;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  border: 1px solid var(--el-border-color-lighter, #ebeef5);
 }
 
-.workspace-placeholder {
-  flex: 1;
-  color: var(--color-text-muted);
+.image-preview-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
-.workspace-btn {
-  flex-shrink: 0;
+.image-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  border: none;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border: none;
-  background: transparent;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  color: var(--color-text-tertiary);
-  font-size: var(--font-xs);
-  transition: all 0.15s ease;
+  justify-content: center;
+  transition: background 0.15s ease;
 }
 
-.workspace-btn:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
-}
-
-.workspace-btn.primary {
-  background: var(--color-text-primary);
-  color: #fff;
-  padding: 4px 10px;
-}
-
-.workspace-btn.primary:hover {
-  background: #000;
-}
-
-.workspace-info.empty {
-  border-style: dashed;
+.image-remove:hover {
+  background: rgba(0, 0, 0, 0.8);
 }
 
 .input-container {
@@ -331,7 +504,6 @@ defineExpose({
   position: relative;
 }
 
-/* 斜杠命令菜单 */
 .slash-menu {
   position: absolute;
   bottom: calc(100% + 6px);
@@ -364,7 +536,6 @@ defineExpose({
   border-radius: var(--radius-sm);
   cursor: pointer;
   text-align: left;
-  transition: background 0.12s ease;
 }
 
 .slash-item:hover {
@@ -392,18 +563,155 @@ defineExpose({
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 8px 8px 12px;
+  padding: 6px 8px 8px 10px;
 }
 
 .toolbar-left {
   display: flex;
   align-items: center;
   gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.space-picker {
+  position: relative;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.space-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 180px;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: var(--font-sm);
+}
+
+.space-trigger:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.space-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.caret {
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.space-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  width: 260px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg);
+  padding: 8px;
+  z-index: 30;
+}
+
+.space-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  background: var(--color-bg-soft);
+  border-radius: 10px;
+  color: var(--color-text-muted);
+}
+
+.space-search input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: var(--font-sm);
+  color: var(--color-text-primary);
+}
+
+.space-search input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.space-menu-list {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.space-option {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.space-option:hover,
+.space-option.active {
+  background: var(--color-bg-hover);
+}
+
+.opt-folder {
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+}
+
+.space-option-name {
+  font-size: var(--font-sm);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-option.action {
+  color: var(--color-text-secondary);
+}
+
+.space-option.action svg {
+  color: var(--color-text-tertiary);
+}
+
+.space-empty {
+  padding: 12px;
+  text-align: center;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+
+.space-menu-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 6px 0;
 }
 
 .model-select {
-  width: 130px;
-  margin-right: 4px;
+  width: 120px;
+  margin-right: 2px;
+  flex-shrink: 0;
 }
 
 .tool-btn {
@@ -417,7 +725,7 @@ defineExpose({
   border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--color-text-tertiary);
-  transition: all 0.15s ease;
+  flex-shrink: 0;
 }
 
 .tool-btn:hover {
@@ -425,34 +733,41 @@ defineExpose({
   color: var(--color-text-primary);
 }
 
-.send-btn {
+.send-btn,
+.stop-btn {
   width: 32px;
   height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   border: none;
-  background: var(--color-text-primary);
-  color: #ffffff;
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.15s ease;
   flex-shrink: 0;
+}
+
+.send-btn {
+  background: var(--color-text-primary);
+  color: #ffffff;
 }
 
 .send-btn:hover:not(:disabled) {
   background: #000;
-  transform: translateY(-0.5px);
-}
-
-.send-btn:active:not(:disabled) {
-  transform: translateY(0);
 }
 
 .send-btn:disabled {
   background: var(--color-bg-hover);
   color: var(--color-text-muted);
   cursor: not-allowed;
+}
+
+.stop-btn {
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.stop-btn:hover {
+  background: #b91c1c;
 }
 
 :deep(.el-textarea__inner) {
@@ -475,7 +790,6 @@ defineExpose({
   box-shadow: none;
   padding: 0 8px;
   border-radius: var(--radius-sm);
-  transition: background 0.15s;
 }
 
 :deep(.el-select:hover .el-input__wrapper) {

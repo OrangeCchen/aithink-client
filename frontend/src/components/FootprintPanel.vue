@@ -1,7 +1,7 @@
 <template>
-  <div class="footprint-panel">
+  <div class="footprint-panel" :class="{ compact }">
     <div v-if="recordings.length === 0" class="empty-state">
-      <div class="empty-icon">
+      <div v-if="!compact" class="empty-icon">
         <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5">
           <circle cx="12" cy="12" r="3"></circle>
           <circle cx="12" cy="12" r="9"></circle>
@@ -102,6 +102,14 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick } from 'vue';
 import type { RecordingSession, PageVisit } from '@shared/types';
+
+withDefaults(
+  defineProps<{
+    /** 侧栏紧凑布局 */
+    compact?: boolean;
+  }>(),
+  { compact: false }
+);
 
 const recordings = ref<RecordingSession[]>([]);
 const expandedIds = ref<Set<string>>(new Set());
@@ -232,6 +240,44 @@ onUnmounted(() => {
 <style scoped>
 .footprint-panel {
   padding: 8px 0;
+}
+
+.footprint-panel.compact {
+  padding: 0;
+}
+
+.footprint-panel.compact .empty-state {
+  padding: 8px 10px 12px;
+}
+
+.footprint-panel.compact .empty-text {
+  font-size: var(--font-sm);
+}
+
+.footprint-panel.compact .recording-header {
+  padding: 6px 8px;
+}
+
+.footprint-panel.compact .recording-name {
+  font-size: var(--font-sm);
+}
+
+.footprint-panel.compact .page-item {
+  padding: 4px 8px 4px 18px;
+}
+
+.footprint-panel.compact .page-count {
+  padding: 1px 6px;
+}
+
+.footprint-panel.compact .action-btn {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.footprint-panel.compact .recording-header:hover .action-btn {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .empty-state {

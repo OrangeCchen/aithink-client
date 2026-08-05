@@ -1,22 +1,13 @@
 <template>
   <div class="thinking">
-    <div class="avatar">
-      <svg viewBox="0 0 32 32" width="20" height="20">
-        <defs>
-          <linearGradient :id="gradId" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#667eea" />
-            <stop offset="100%" stop-color="#764ba2" />
-          </linearGradient>
-        </defs>
-        <circle cx="16" cy="16" r="15" :fill="`url(#${gradId})`" />
-        <path d="M16 8 L18.5 13.5 L24 16 L18.5 18.5 L16 24 L13.5 18.5 L8 16 L13.5 13.5 Z"
-              fill="white" />
-      </svg>
-    </div>
     <div class="bubble">
-      <span class="dot dot1"></span>
-      <span class="dot dot2"></span>
-      <span class="dot dot3"></span>
+      <span class="label">{{ label }}</span>
+      <span class="dots" aria-hidden="true">
+        <span class="dot"></span>
+        <span class="dot"></span>
+        <span class="dot"></span>
+      </span>
+      <span v-if="detail" class="detail">{{ detail }}</span>
       <span class="timer">{{ elapsed }}s</span>
     </div>
   </div>
@@ -25,7 +16,17 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
 
-const gradId = `ti-grad-${Math.random().toString(36).slice(2, 8)}`;
+withDefaults(
+  defineProps<{
+    label?: string;
+    detail?: string;
+  }>(),
+  {
+    label: '深度思考中',
+    detail: ''
+  }
+);
+
 const elapsed = ref(0);
 let timer: number | null = null;
 
@@ -36,70 +37,73 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  if (timer !== null) {
-    clearInterval(timer);
-  }
+  if (timer !== null) clearInterval(timer);
 });
 </script>
 
 <style scoped>
 .thinking {
   display: flex;
-  gap: 12px;
   margin-bottom: 16px;
-  padding: 0 16px;
-  align-items: center;
-}
-
-.avatar {
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 50%;
-  flex-shrink: 0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  padding: 0 28px;
 }
 
 .bubble {
-  padding: 14px 18px;
-  background: #f9fafb;
-  border-radius: 12px;
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  padding: 4px 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-sm);
+}
+
+.label {
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.dots {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
 }
 
 .dot {
-  width: 7px;
-  height: 7px;
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
-  background: #9ca3af;
+  background: var(--color-text-muted);
   animation: pulse 1.4s infinite ease-in-out;
 }
 
-.dot2 {
+.dot:nth-child(2) {
   animation-delay: 0.2s;
 }
 
-.dot3 {
+.dot:nth-child(3) {
   animation-delay: 0.4s;
 }
 
+.detail {
+  color: var(--color-text-muted);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .timer {
-  font-size: 12px;
-  color: #9ca3af;
   font-variant-numeric: tabular-nums;
-  margin-left: 4px;
+  color: var(--color-text-muted);
+  margin-left: 2px;
 }
 
 @keyframes pulse {
-  0%, 60%, 100% {
+  0%,
+  60%,
+  100% {
     opacity: 0.3;
-    transform: scale(0.8);
+    transform: scale(0.85);
   }
   30% {
     opacity: 1;

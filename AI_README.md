@@ -2,7 +2,7 @@
 
 这份文档面向后续接手代码的 AI/开发者，用来快速把“要改的功能”映射到“该看的文件”。内容以当前代码为准，不以旧 README 或规划文档为准。
 
-最后梳理时间：2026-08-03
+最后梳理时间：2026-08-05
 
 ## 0. 和 README 的关系
 
@@ -12,12 +12,12 @@
 
 后续如果修改了架构、运行命令、配置项、数据存储、IPC/HTTP API、核心功能状态或 `plugins/prd2spec/` 联动逻辑，需要同步检查并更新 `README.md` 和 `AI_README.md`。不要只更新其中一份。
 
-专题文档统一放在 `docs/`：
+专题文档统一放在 `docs/`；架构方案多在 `docs/方案/`：
 
-- `docs/DEVELOPMENT.md`：开发与运行指南。
 - `docs/FEATURE_REQUIREMENTS.md`：功能需求清单。
-- `docs/ASR_IMPLEMENTATION_SUMMARY.md`：ASR 实现总结。
-- `docs/ASR_USAGE_GUIDE.md`：ASR 使用指南。
+- `docs/方案/APP_ORCHESTRATOR.md`：本机 App 调度台。
+- `docs/方案/SIDECAR_SUMMARY.md` / `SIDECAR_MIGRATION.md`：Sidecar 迁移。
+- 文件转写与会议纪要的当前实现以本文第 6、10、11 节为准。
 
 ## 1. 关注范围
 
@@ -44,8 +44,8 @@
 - Vue 3.5 + TypeScript + Vite
 - Element Plus
 - Pinia
-- `@anthropic-ai/claude-agent-sdk`
-- ~~`sherpa-onnx-node`~~ 已移除（识别效果差）。ASR 代码与 IPC 仍在，但 `asr-service.ts` 改为懒加载 sherpa，缺包时使用即报错；当前无可用本地识别引擎
+- 自研 AgentRuntime（`electron/service/agent/*`）：Qwen 走 DashScope OpenAI 兼容直连，Claude 走 Anthropic Messages 直连；已移除 `@anthropic-ai/claude-agent-sdk` 与默认 LiteLLM 中转
+- `whisper-cpp-node`：在隔离子进程中加载本地 GGML Whisper 模型；`@ffmpeg-installer/ffmpeg` 负责音视频格式归一化
 
 运行脚本在 `package.json`：
 
@@ -68,11 +68,13 @@
 4. 开发环境加载 `http://localhost:5173`，生产环境加载 `frontend/dist/index.html`。
 5. `main.ts` 注册 IPC：
    - `registerChatHandlers()`
+   - `registerSpaceHandlers()`
    - `registerConfigHandlers()`
    - `registerRecordingHandlers()`
-   - `registerASRHandlers()`
+   - `registerSkillHandlers()`
+   - `registerTranscriptionHandlers()`
 6. `main.ts` 启动本地 HTTP 服务 `startHttpServer()`，默认监听 `127.0.0.1:18790`。
-7. `registerASRHandlers()` 已启用，注册 `asr:*` IPC（初始化、实时/文件转写、`asr:selectAudioFile`、`asr:getDefaultConfig` 等）。`getDefaultConfig` 在主进程解析 `resources/models/zh-streaming/` 下的模型路径——但**该目录及 sherpa 依赖已移除**，`ready` 恒为 false，前端初始化会报"未找到模型"。`asr-service.ts` 懒加载 sherpa，`initialize` 实际调用时抛"未安装"。重新启用需 `npm i sherpa-onnx-node` 并放回模型（或改接其它引擎）。
+7. `registerTranscriptionHandlers()` 注册 `transcription:*` IPC：文件选择/排队转写、粘贴听写建档、FFmpeg + Whisper、历史/重命名、纪要生成与修订润色、AI 标题、导出与桌面通知；不再申请麦克风权限或连接实时 ASR WebSocket。
 
 ## 4. 前端视图与导航
 
@@ -80,12 +82,13 @@
 
 - `chat`：默认对话页，渲染 `ChatView` + `RightPanel`。
 - `knowledge`：知识空间页，渲染 `KnowledgeSpaceView`。
-- `asr`：语音转写页，渲染 `ASRTranscription`。
+- `transcription`：文件转写页（音视频转写 / 粘贴听写 / 纪要编辑），渲染 `FileTranscriptionView`。
+- `skill`：技能中心，渲染 `SkillMarketView`。
 
 相关文件：
 
-- `frontend/src/stores/ui.ts`：定义 `MainView` 和 `showChat/showKnowledge/showASR`。
-- `frontend/src/components/Sidebar.vue`：左侧导航、最近会话、设置入口。
+- `frontend/src/stores/ui.ts`：定义 `MainView` 和 `showChat/showKnowledge/showTranscription/showSkill`。
+- `frontend/src/components/Sidebar.vue`：左侧导航、「空间」+「最近」、设置入口。
 - `frontend/src/App.vue`：根据 `activeView` 条件渲染页面。
 
 新增页面时通常需要：
@@ -99,50 +102,67 @@
 
 核心链路：
 
-1. 用户在 `frontend/src/components/InputBar.vue` 输入。
-2. `frontend/src/stores/chat.ts` 的 `sendMessage(prompt, model)` 先把用户消息加入本地 UI。
+1. 用户在 `frontend/src/components/InputBar.vue` 输入（可先选空间；支持粘贴图片 Ctrl+V；运行中显示终止按钮）。
+2. `frontend/src/stores/chat.ts` 的 `sendMessage(prompt, model, images?)` 先把用户消息加入本地 UI，并带上 `spaceId` / `workspacePath` / `images`（base64 data URL 数组）。
 3. 前端通过 `window.electronAPI.invoke('agent:query', params)` 调用主进程。
-4. `electron/controller/chat.ts` 接收 `agent:query`。
-5. 如果没有 `sessionId`，创建新 `Session`，默认工作目录为 `~/Documents/AIThink-Workspace`。
-6. 用户消息写入 `electron/service/database.ts`。
-7. `electron/service/agent-sdk.ts` 的 `startQuery()` 动态加载 `@anthropic-ai/claude-agent-sdk`。
-8. `agent-sdk.ts` 根据模型名判断 provider：
-   - `model.startsWith('qwen')` 使用 `config.qwen`。
-   - 其他模型使用 `config.claude`。
-9. SDK 流式事件被转换为 `shared/types.ts` 里的 `StreamEvent`。
+4. `electron/controller/chat.ts` 接收 `agent:query`，提取 `images` 参数。
+5. 如果没有 `sessionId`，创建新 `Session`，工作目录取当前空间；缺省回落默认空间（首次 `~/Documents/AIThink-Workspace`，可在设置改）。
+6. 用户消息（含图片）写入 `electron/service/database.ts`。
+7. `electron/service/agent-sdk.ts` 的 `startQuery()` 进入自研 AgentRuntime：
+   - `qwen*` → `agent/openai-loop.ts`（DashScope `/compatible-mode/v1` 等 OpenAI 兼容接口；图片转 `{ type: 'image_url', image_url: { url: dataUrl } }` content parts）
+   - 其它 → `agent/anthropic-loop.ts`（Anthropic `/v1/messages`；图片转 `{ type: 'image', source: { type: 'base64', media_type, data } }` content blocks）
+8. Runtime 同步已装技能、注入 system prompt，并在 tool loop 中执行 `Read/Write/Bash/Glob/Skill/AskUserQuestion`（路径/Bash 经 `agent/sandbox.ts`）。
+9. 流式事件为 `shared/types.ts` 的 `StreamEvent`（含 `ask_user_question`、`text_replace`、`done.cancelled`）。
 10. 主进程通过 `mainWindow.webContents.send('agent:stream', event)` 推给渲染进程。
 11. `frontend/src/composables/useAgentStream.ts` 监听 `agent:stream`。
-12. `chatStore` 更新 `streamBuffer/currentToolCalls`。
-13. 收到 `done` 后，前端提交 assistant 消息；主进程也会把 assistant 消息写入 JSON 数据库。
+12. `chatStore` 更新 `streamBuffer/currentToolCalls`；提问进 `question` store / 右侧问题面板。
+13. 若工具含 `AskUserQuestion`，主进程发 `text_replace` 把主对话长文收成一句引导，避免与右侧问卷重复。
+14. 收到 `done` 后，前端提交 assistant 消息；主进程也会把 assistant 消息写入 JSON 数据库。
+15. 终止：`chatStore.cancelStreaming()` → `agent:cancel` → `AbortController` + 杀 Bash 进程树 + 拒绝挂起提问。
+
+**并发任务派发**（Mock 演示）：
+- `chatStore.dispatchMultipleTasks(tasks)` 创建 `ExternalTask[]`，塞进派发消息的 `dispatchTasks` 字段（不再用纯文本）。
+- `MessageBubble` 检测到 `dispatchTasks` 渲染成横排卡片网格（3列自适应），每张卡片显示 app 名称、状态徽章、prompt、可折叠进度日志。
+- `mockExecuteTask` 更新任务状态和 `task.logs` 后，通过 `appendToMessageIn` 重新映射 `dispatchTasks` 数组以触发 Vue 响应式刷新。
+- 流式阶段：`chatStore.streamDispatchTasks` 携带任务列表，避免流结束时卡片突然弹出。
 
 对话相关核心文件：
 
-- `shared/types.ts`
-- `electron/controller/chat.ts`
-- `electron/service/agent-sdk.ts`
+- `shared/types.ts`（`Session.spaceId`、`Message.images`、`Message.dispatchTasks`、`ExternalTask`、`WorkspaceSpace`、`StreamEvent`）
+- `electron/controller/chat.ts` / `space.ts`
+- `electron/service/agent-sdk.ts`（入口，`QueryOptions.images`）
+- `electron/service/agent/openai-loop.ts` / `anthropic-loop.ts` / `tools.ts` / `sandbox.ts` / `skills-context.ts`
 - `electron/service/database.ts`
-- `frontend/src/stores/chat.ts`
+- `frontend/src/stores/chat.ts` / `space.ts` / `question.ts`
 - `frontend/src/composables/useAgentStream.ts`
 - `frontend/src/views/ChatView.vue`
-- `frontend/src/components/MessageBubble.vue`
-- `frontend/src/components/ToolExecution.vue`
+- `frontend/src/components/MessageBubble.vue` / `ToolExecution.vue` / `InputBar.vue` / `QuestionPanel.vue` / `ArtifactTree.vue`
 
 ## 6. IPC 约定
 
-`preload.ts` 暴露了两套 API：
-
-- `window.electron`：`invoke(channel, ...args)`，事件 callback 带原始 event。
-- `window.electronAPI`：`invoke(channel, data?)`，事件 callback 只收 data。
-
-现有多数前端代码用 `window.electronAPI`。ASR 代码用 `window.electron`（两者均在 `preload.ts` 通过 `contextBridge` 暴露，并在 `frontend/src/env.d.ts` 中声明类型）。ASR handlers 已在主进程注册。
+`preload.ts` 统一暴露 `window.electronAPI`：`invoke(channel, data?)`、事件订阅以及拖入文件的安全路径解析 `getPathForFile(file)`。旧 `window.electron` 兼容桥已随实时 ASR 删除。
 
 已注册的主要 IPC：
 
 - `agent:query`
 - `agent:cancel`
+- `agent:answer-question`
 - `agent:list-sessions`
 - `agent:get-session`
+- `agent:get-session-info`
 - `agent:delete-session`
+- `agent:delete-all-sessions`
+- `space:list` / `space:create` / `space:update` / `space:delete`
+- `space:list-files` / `space:reveal`
+- `transcription:select-file` / `transcription:select-model` / `transcription:get-config`
+- `transcription:enqueue` / `transcription:start` / `transcription:cancel` / `transcription:progress`
+- `transcription:create-from-text`（粘贴听写 → 建档，可直接生成纪要）
+- `transcription:list` / `transcription:get` / `transcription:delete` / `transcription:rename`
+- `transcription:update-transcript` / `transcription:update-minutes` / `transcription:generate-minutes`
+- `transcription:rewrite-selection`（划词局部润色）
+- `transcription:revise-minutes`（按意见全局修订整篇纪要）
+- `transcription:generate-title`（按纪要生成 ≤15 字摘要标题并改名）
+- `transcription:export`
 - `config:get`
 - `config:set`
 - `recording:list`
@@ -192,27 +212,29 @@ macOS 默认数据文件：
 
 - `~/Library/Application Support/aithink/aithink.json`
 - `~/Library/Application Support/aithink/config.json`
-- `~/Library/Application Support/aithink/recordings/`（实时转写保存的 WAV）
-- `~/Library/Application Support/aithink/models/`（运行时大模型，见下）
+- `~/Library/Application Support/aithink/transcriptions/{id}/record.json`（转写、片段和纪要）
+- `~/Library/Application Support/aithink/models/`（推荐的 GGML 模型目录；也可在页面引用其它位置）
 
-运行时模型目录 `aithink/models/`（不随包分发；原打包的 `resources/models/zh-streaming/` 流式 ASR 模型已删除）当前含：`ggml-large-v3-turbo.bin`（Whisper，引擎待接入）、`sherpa-onnx-pyannote-segmentation-3-0.onnx`（说话人分离，待接入）、`3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx`（说话人识别，待接入）。这些模型复用自参考应用「艾德智能笔记」，已复制到本项目自己的 `aithink/models/`，接入时用 `app.getPath('userData')` 解析，不要硬编码参考应用目录。
+GGML 模型不随包分发。用户在文件转写页选择 `ggml-*.bin` 后，路径保存到 `config.json` 的 `transcription.modelPath`。当前已验证 `ggml-large-v3-turbo.bin` 可由 Metal 加速加载；Pyannote/3D-Speaker ONNX 尚未接入，不承诺说话人分离。
 
 `aithink.json` 结构由 `DataStore` 管理：
 
-- `sessions: Session[]`
+- `sessions: Session[]`（含可选 `spaceId` / `workspacePath`）
 - `messages: Record<sessionId, Message[]>`
+- `spaces: WorkspaceSpace[]`（含 `isDefault`；默认空间不可删）
 - `recordings: RecordingSession[]`
 - `pages: PageVisit[]`
 
-写入通过 `writePromise` 串行化，避免并发写文件互相覆盖。
+写入通过 `writePromise` 串行化，避免并发写文件互相覆盖。  
+默认空间路径：`database.defaultWorkspacePath()` → `~/Documents/AIThink-Workspace`；用户可在设置「最近目录」经 `space:update` 修改。
 
 配置服务：`electron/service/config-service.ts`
 
 默认配置来自 `shared/types.ts` 的 `DEFAULT_CONFIG`：
 
 - Claude 默认 baseUrl：`https://api.anthropic.com`
-- Qwen 默认 baseUrl：`http://localhost:8000`
-- Qwen 默认 apiKey：`sk-aithink-local`
+- Qwen 默认 baseUrl：`https://dashscope.aliyuncs.com/compatible-mode/v1`
+- Qwen 默认 apiKey：空（需在设置中填写 DashScope Key）
 - 默认模型：`qwen-plus`
 
 ## 8. 模型和配置逻辑
@@ -225,24 +247,18 @@ macOS 默认数据文件：
 - 版本号型号：`qwen3.8-max`、`qwen3.7-max`、`qwen3.7-plus`、`qwen3.6-flash`
 - 滚动别名（始终指向最新稳定版本）：`qwen-max`、`qwen-plus`、`qwen-flash`、`qwen-turbo`、`qwen3-coder-plus`
 
-Qwen 同时保留带版本号的最新旗舰型号与滚动别名。这些 `model_name` 必须与 `litellm-config.yaml` 的 `model_list` 一一对应，否则该模型经代理调用会失败。新增/改名 Qwen 模型时两处同步改。
+Qwen 通过 DashScope OpenAI 兼容接口直连，`model` 名需为百炼支持的模型 id。`litellm-config.yaml` / `start-litellm.sh` 仅作可选兼容遗留，默认开发路径不再需要。
 
 设置弹窗：
 
-- `frontend/src/components/SettingsDialog.vue`
+- `frontend/src/components/SettingsDialog.vue`（Qwen「测试连接」；通用页可改默认模型与「最近目录」）
 
 主进程配置 IPC：
 
 - `electron/controller/config.ts`
 - `electron/service/config-service.ts`
 
-Agent SDK 调用时，`agent-sdk.ts` 会把配置写入 `process.env.ANTHROPIC_API_KEY` 和 `process.env.ANTHROPIC_BASE_URL`，并在 SDK `options.env` 中显式传入，避免外部 Claude Code 全局配置覆盖。
-
-Qwen 依赖外部 LiteLLM 或兼容 Anthropic/OpenAI 的代理。相关文件：
-
-- `litellm-config.yaml`
-- `start-litellm.sh`
-- `.env.example`
+若本地仍存着旧配置（`http://localhost:8000` + `sk-aithink-local`），请在设置中改为 DashScope 直连地址与真实 API Key。
 
 ## 9. 本地 HTTP 服务和浏览器扩展同步
 
@@ -293,24 +309,33 @@ Qwen 依赖外部 LiteLLM 或兼容 Anthropic/OpenAI 的代理。相关文件：
 
 已接入主链路：
 
-- 桌面端 AI 对话。
-- Agent SDK 流式输出。
+- 桌面端 AI 对话；任务终止（`agent:cancel`）。
+- AgentRuntime 流式输出与工具循环（Qwen/Claude 直连）。
 - 工具调用卡片展示。
+- **空间 / 最近**：`space` store + Sidebar；默认空间任务进「最近」；自定义空间可嵌套任务。
+- **产物**：右侧文件树（`space:list-files` + `ArtifactTree`）。
+- **问题面板**：`AskUserQuestion` + `text_replace` 防主对话重复问卷长文。
+- **轻量沙箱**：`agent/sandbox.ts`（路径围栏 + 危险 Bash 黑名单）；非 Docker/VM。
 - 会话创建、读取、删除和历史列表。
-- Claude/Qwen 配置和模型切换。
-- 本地 JSON 持久化。
+- Claude/Qwen 配置和模型切换；设置可改「最近目录」。
+- 本地 JSON 持久化（含 `spaces`）。
 - 浏览器扩展会话同步。
 - 浏览足迹录制后端和部分 UI。
 - 自定义无边框窗口控制。
-- 技能中心：市场/我的技能双页签、官方与社区来源、搜索、安装确认壳、站内详情、安装/移除、Agent 自动使用（详见第 11 节）。
-- 右侧「问题」面板：拦截 SDK `AskUserQuestion`，结构化选项 + 提交答案 / AI 自行决定（`agent:answer-question`）。
+- 技能中心：市场/我的技能、官方与社区、安装/移除、Agent 自动使用（详见第 11 节）。
+- **文件转写 / 会议纪要**（详见第 11 节文件映射）：
+  - Whisper 本地引擎 + FFmpeg；多文件排队；进度/取消；历史；重命名（媒体同步改磁盘文件名）
+  - 粘贴听写建档（`sourceType: 'dictation'`）；听写纪要可与媒体转写队列并行（纪要不占媒体坑位）
+  - 纪要生成/校对；划词注释与局部润色；全局修订；AI 摘要标题；Markdown 导出
+  - 侧栏 attention（完成绿点 / 失败标记）与系统桌面通知
 
 半完成或占位：
 
 - 知识空间：`KnowledgeSpaceView.vue` 主要是 mock UI，后端 `knowledge:*` IPC 未实现。
-- ASR：已接入。`main.ts` 注册 `registerASRHandlers()`，`tsconfig.node.json` 的 `include` 覆盖 ASR controller/service。流式实时转写与 WAV 文件转写（`transcribeAudioFile` 用 sherpa `readWave` 分块喂流式识别器）均可用。待完善：Whisper 引擎（`asr-service.ts` 仍抛 "not yet implemented"）、非 WAV 格式（需 FFmpeg 转码）、说话人分离。
-- 定时任务、附件、草稿区、工作目录文件管理：多为按钮或面板占位。
-- README 中提到 SQLite/better-sqlite3，但当前代码实际使用 JSON 文件。
+- 文件转写未支持：实时录音、说话人分离（Pyannote/3D-Speaker ONNX 未接入）。
+- 定时任务、附件、草稿区、语音输入：多为按钮或面板占位。
+- 容器级沙箱（Docker）未做；当前仅为工作区轻量围栏。
+- 存储为 JSON 文件，不是 SQLite。
 
 ## 11. 按需求定位文件
 
@@ -318,9 +343,21 @@ Qwen 依赖外部 LiteLLM 或兼容 Anthropic/OpenAI 的代理。相关文件：
 
 - `electron/controller/chat.ts`
 - `electron/service/agent-sdk.ts`
+- `electron/service/agent/openai-loop.ts` / `anthropic-loop.ts` / `tools.ts` / `sandbox.ts`
 - `frontend/src/stores/chat.ts`
 - `frontend/src/composables/useAgentStream.ts`
 - `frontend/src/views/ChatView.vue`
+- `frontend/src/components/InputBar.vue`（发送 / 终止 / 选空间 / 斜杠技能）
+
+新增或优化“空间 / 最近 / 产物”：
+
+- `shared/types.ts`（`WorkspaceSpace` / `SpaceFileEntry`）
+- `electron/service/database.ts`（spaces CRUD、默认空间）
+- `electron/controller/space.ts`
+- `frontend/src/stores/space.ts`
+- `frontend/src/components/Sidebar.vue`
+- `frontend/src/components/ArtifactTree.vue` / `RightPanel.vue`
+- `frontend/src/components/SettingsDialog.vue`（最近目录）
 
 新增“会话字段/消息字段/工具调用结构”：
 
@@ -378,18 +415,23 @@ Qwen 依赖外部 LiteLLM 或兼容 Anthropic/OpenAI 的代理。相关文件：
 - 扩展 `electron/service/database.ts` 或新增 service
 - 在 `electron/main.ts` 注册 handler
 
-“ASR 语音转写”相关文件（已接入，可在此基础上完善 Whisper / FFmpeg / 说话人分离）：
+“本地文件转写 / 会议纪要”相关文件：
 
-- `frontend/src/views/ASRTranscription.vue`
-- `frontend/src/composables/useASR.ts`
-- `shared/asr-types.ts`
-- `electron/controller/asr.ts`
-- `electron/service/asr-service.ts`
-- `electron/service/audio-recorder-service.ts`
-- `electron/main.ts`
-- ~~`resources/models/zh-streaming/`~~ 已删除（原流式中文模型，效果差），`electron-builder.json` 的 `extraResources` 也已移除
-- `electron/types/sherpa-onnx-node.d.ts`（保留：使 ASR 代码在缺包时仍能 tsc 编译）
-- `tsconfig.node.json`
+- `frontend/src/views/FileTranscriptionView.vue`（列表 / Setup：音视频|听写 / 详情双栏 / 纪要放大）
+- `frontend/src/composables/useFileTranscription.ts`（单例状态、排队、纪要与 attention）
+- `frontend/src/composables/useTextPolish.ts`（划词 peek / mark / 浮层定位 / 替换）
+- `frontend/src/components/QuickPolishPanel.vue`（快速润色浮层：Markdown 预览、箭头锚定选区）
+- `frontend/src/components/Sidebar.vue`（「文件转写」入口与进行中/完成/失败角标）
+- `shared/transcription-types.ts`
+- `electron/controller/transcription.ts`（全部 `transcription:*` IPC）
+- `electron/service/audio-converter.ts`
+- `electron/service/whisper-transcription-service.ts` / `whisper-worker.ts`
+- `electron/service/transcription-repository.ts`
+- `electron/service/meeting-minutes-service.ts`（纪要生成 / 局部润色 / 全局修订 / 摘要标题）
+- `electron/service/text-generation-service.ts`
+- `electron/service/desktop-notify.ts`
+- `electron/service/media-protocol.ts`（本地媒体播放协议，若启用）
+- `electron/main.ts` / `electron-builder.json`
 
 “技能中心”相关文件（已接入：双页签 + 来源筛选 + 搜索 + 安装确认壳 + 站内详情 + 安装/移除 + Agent 自动使用）：
 
@@ -409,8 +451,9 @@ Qwen 依赖外部 LiteLLM 或兼容 Anthropic/OpenAI 的代理。相关文件：
 - `electron/main.ts`（注册 `registerSkillHandlers()`）
 - `frontend/src/stores/chat.ts` / `InputBar.vue`（「立即使用」回填与 `/` 斜杠调用）
 - `frontend/src/stores/question.ts` + `components/QuestionPanel.vue` + `RightPanel.vue`（AskUserQuestion 右侧作答）
-- `electron/service/agent-sdk.ts`（`canUseTool` 挂起提问；`resolveAskUserQuestion`）
-- `electron/controller/chat.ts`（`agent:answer-question` IPC）
+- `electron/service/agent-sdk.ts`（`waitForUserAnswer` / `resolveAskUserQuestion` / `cancelQuery`）
+- `electron/controller/chat.ts`（`agent:answer-question` / `agent:cancel` IPC）
+- `electron/service/agent/sandbox.ts`（轻量沙箱：路径围栏 + 危险命令 + 受限 Bash）
 
 浏览数据流：`SkillMarketView` → `stores/skill.ts` → `skill:list`（可带 `keyword`/`origin`）→ `skillhub-service`（官方静态或 skillhub.cn）→ 归一化返回。详情：`skill:detail`（官方预览种子可本地详情）。
 
@@ -488,21 +531,25 @@ Qwen 依赖外部 LiteLLM 或兼容 Anthropic/OpenAI 的代理。相关文件：
 - 新模型不要只改 UI 列表；还要检查 `agent-sdk.ts` 的 provider 判断和配置注入。
 - 扩展同步接口当前无鉴权，只监听本机 `127.0.0.1`，新增敏感能力时要重新评估安全边界。
 - `window.electron` 和 `window.electronAPI` 并存，新增代码优先沿用当前模块附近的调用风格。
-- ASR 目录代码存在不代表功能可用；恢复前必须处理 `main.ts` 注册和 `tsconfig.node.json` exclude。
+- 文件转写依赖用户选择本地 GGML 模型；纪要/润色/AI 标题另需配置当前默认 Qwen/Claude 的 API Key。转写失败不应丢失已有记录，纪要失败不应丢失转写；听写路径可无 `sourcePath`/`modelPath`。
 - JSON 数据库写入是全量写文件；如果会话/足迹数据量变大，需要评估迁移 SQLite 或分文件存储。
+- **沙箱是轻量圈地**（`sandbox.ts`），不是 Docker/VM；Bash 仍可能 `cd` 出工作区，文件工具有硬围栏。加重隔离应扩展 `sandbox.ts`，不要在 `tools.ts` 再散落一套逻辑。
+- 改默认工作区路径：优先走 `space:update` 更新默认空间的 `folderPath`，不要只改 `defaultWorkspacePath()` 而忽略已有 `aithink.json`。
+- 调用官方技能时 Skill 工具的 `name` 必须是 kebab-case id（如 `business-skill-builder`），不能用中文展示名。
 
 ## 14. 快速心智模型
 
 把 AIThink 理解成三层：
 
-1. 桌面端 Vue UI：负责输入、显示、导航和设置。
-2. Electron 主进程：负责 Agent SDK、配置、持久化、本地 HTTP、系统能力。
+1. 桌面端 Vue UI：负责输入、空间/最近、产物/问题面板、导航和设置。
+2. Electron 主进程：负责 AgentRuntime、轻量沙箱、空间持久化、配置、本地 HTTP、系统能力。
 3. 浏览器扩展：负责浏览器上下文内的 PRD/设计稿/问答/足迹采集，并通过本地 HTTP 同步回桌面端。
 
 最核心的边界是：
 
 - 前端和主进程之间走 IPC。
 - 扩展和桌面端之间走 `127.0.0.1:18790` HTTP。
-- Agent 能力只在主进程的 `agent-sdk.ts` 里接入。
-- 数据真实落点在 `aithink.json` 和 `config.json`。
+- Agent 能力只在主进程的 `agent-sdk.ts` + `agent/*` 里接入。
+- 工作区边界由当前空间的 `folderPath` + `sandbox.ts` 共同约束。
+- 数据真实落点在 `aithink.json`（含 spaces）和 `config.json`。
 

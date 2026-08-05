@@ -23,7 +23,10 @@ export async function loadConfig(): Promise<AppConfig> {
     cached = {
       claude: { ...DEFAULT_CONFIG.claude, ...(parsed.claude || {}) },
       qwen: { ...DEFAULT_CONFIG.qwen, ...(parsed.qwen || {}) },
-      dashscopeAsr: { ...DEFAULT_CONFIG.dashscopeAsr, ...(parsed.dashscopeAsr || {}) },
+      transcription: {
+        ...DEFAULT_CONFIG.transcription,
+        ...(parsed.transcription || {})
+      },
       defaultModel: parsed.defaultModel || DEFAULT_CONFIG.defaultModel
     };
   } catch (error: any) {

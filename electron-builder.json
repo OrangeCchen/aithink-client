@@ -9,6 +9,10 @@
     "frontend/dist/**/*",
     "package.json"
   ],
+  "asarUnpack": [
+    "node_modules/@whisper-cpp-node/**/*",
+    "node_modules/@ffmpeg-installer/**/*"
+  ],
   "extraResources": [
     {
       "from": "resources/official-skills",

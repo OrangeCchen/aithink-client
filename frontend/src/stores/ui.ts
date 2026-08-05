@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 
-export type MainView = 'chat' | 'knowledge' | 'asr' | 'skill';
+export type MainView = 'chat' | 'knowledge' | 'transcription' | 'skill';
 
 export const useUiStore = defineStore('ui', {
   state: () => ({
@@ -21,8 +21,8 @@ export const useUiStore = defineStore('ui', {
       this.activeView = 'knowledge';
     },
 
-    showASR() {
-      this.activeView = 'asr';
+    showTranscription() {
+      this.activeView = 'transcription';
     },
 
     showSkill() {

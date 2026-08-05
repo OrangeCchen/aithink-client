@@ -18,49 +18,26 @@
 
 ## 🎯 核心功能模块
 
-### 1️⃣ 语音识别与转写 (ASR)
+### 1️⃣ 本地文件转写
 
-#### 1.1 多引擎支持
-- [ ] **Sherpa-ONNX 引擎**
-  - [ ] Qwen3-ASR 模型（0.6B-int8）- 高性能中文识别
-  - [ ] SenseVoice 模型 - 多语言支持（中英日韩粤）
-  - [ ] 支持离线识别，保护隐私
-  - [ ] 支持实时流式识别
-  
-- [ ] **Whisper 引擎**（备选/增强）
-  - [ ] 支持多种 Whisper 模型规格
-  - [ ] 更高的识别准确率
-  - [ ] 支持更多语言
+> 产品边界：已删除实时录音/流式 ASR，只处理用户选择的已有音视频文件。
 
-#### 1.2 识别参数配置
-```javascript
-{
-  vadThreshold: 0.5,              // VAD 阈值
-  minSilenceDuration: 1.5,        // 最小静音时长（秒）
-  minSpeechDuration: 1,           // 最小语音时长（秒）
-  maxDurationSeconds: 7200,       // 最大录制时长（2小时）
-  vadMaxSpeechDuration: 60,       // VAD 最大语音片段时长
-  minAsrSegmentDuration: 0.8,     // 最小 ASR 片段时长
-  maxAsrSegmentDuration: 60,      // 最大 ASR 片段时长
-  cliNumThreads: 4,               // 线程数
-  asrBatchSize: 2,                // 批处理大小
-  senseVoiceLanguage: "zh"        // 语言设置
-}
-```
-
-#### 1.3 高级功能
-- [ ] **VAD (语音活动检测)**
-  - [ ] 自动检测语音开始和结束
-  - [ ] 智能分段，去除静音部分
-  
-- [ ] **实时转写**
-  - [ ] 边说边转，即时显示文字
-  - [ ] 低延迟流式处理
-  
-- [ ] **后处理优化**
-  - [ ] 标点符号自动添加
-  - [ ] 语气词过滤
-  - [ ] 数字、日期格式化
+- [x] **Whisper GGML 本地引擎**
+  - [x] 支持用户选择 `ggml-*.bin` 模型并持久化路径
+  - [x] 在可终止的隔离子进程中加载模型，macOS 使用 Metal
+  - [x] 产出句段级时间戳与可编辑全文
+- [x] **音视频格式转换**
+  - [x] 随包 FFmpeg 转换 WAV、MP3、M4A、AAC、FLAC 和常见视频
+  - [x] 统一为 16kHz、单声道、16-bit PCM WAV
+  - [x] 完成、取消或失败后清理临时文件
+- [x] **任务体验**
+  - [x] 转换、加载模型、转写分阶段进度
+  - [x] 支持取消、错误恢复与最近记录
+  - [x] 转写与纪要按任务独立持久化
+- [x] **会议纪要**
+  - [x] 使用校对后的全文生成概要、讨论、决策、行动项、风险和待确认事项
+  - [x] 长文本分块提取后汇总
+  - [x] 支持复制和 Markdown 导出
 
 ---
 
@@ -459,18 +436,16 @@ CREATE TABLE results (
 ## 🎯 优先级建议
 
 ### P0 - 核心功能（必须实现）
-1. 基础音频录制
-2. Sherpa-ONNX 语音识别
-3. 富文本编辑器
-4. 本地数据存储
-5. 转写结果展示
+1. 本地 Whisper 文件转写（已完成）
+2. FFmpeg 音视频格式转换（已完成）
+3. 转写校对、历史与本地存储（已完成）
+4. 结构化会议纪要与 Markdown 导出（已完成）
 
 ### P1 - 重要功能（应该实现）
 1. 说话人分离
-2. 实时转写
-3. 音频波形可视化
-4. 模型管理
-5. 导出功能（Markdown、PDF）
+2. 音频波形可视化
+3. 模型下载与管理
+4. PDF / SRT / VTT 导出
 
 ### P2 - 增强功能（可以实现）
 1. 屏幕录制
@@ -490,8 +465,8 @@ CREATE TABLE results (
 ## 📝 实施建议
 
 ### 阶段一：MVP（最小可行产品）
-- 音频录制 + 实时转写 + 基础编辑
-- 预计时间：4-6 周
+- 本地文件转写 + 基础校对 + 结构化纪要
+- 状态：已完成
 
 ### 阶段二：核心完善
 - 说话人分离 + 音频可视化 + 模型管理
@@ -509,9 +484,9 @@ CREATE TABLE results (
 
 ## 📚 参考资源
 
-1. **Sherpa-ONNX**
-   - 官方文档：https://github.com/k2-fsa/sherpa-onnx
-   - Node.js 示例：https://github.com/k2-fsa/sherpa-onnx/tree/master/nodejs-addon-examples
+1. **whisper.cpp**
+   - 官方文档：https://github.com/ggml-org/whisper.cpp
+   - Node.js 绑定：https://www.npmjs.com/package/whisper-cpp-node
 
 2. **Tiptap 编辑器**
    - 官方文档：https://tiptap.dev/docs
@@ -524,5 +499,5 @@ CREATE TABLE results (
 
 ---
 
-*最后更新：2026-08-03*
+*最后更新：2026-08-05*
 *基于 iRecord v0.9.2 和艾德智能笔记 v1.0.1-107 的功能分析*

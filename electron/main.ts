@@ -1,14 +1,34 @@
-import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog, protocol } from 'electron';
 import { join } from 'path';
 import { registerChatHandlers } from './controller/chat.js';
 import { registerConfigHandlers } from './controller/config.js';
 import { registerRecordingHandlers } from './controller/recording.js';
-import { registerASRHandlers } from './controller/asr.js';
+import {
+  interruptActiveTranscriptions,
+  reconcileInterruptedTranscriptions,
+  registerTranscriptionHandlers
+} from './controller/transcription.js';
 import { registerSkillHandlers } from './controller/skill.js';
+import { registerSpaceHandlers } from './controller/space.js';
 import { loadConfig } from './service/config-service.js';
 import { startHttpServer, getLastExtensionPing } from './service/http-server.js';
+import { registerMediaProtocol } from './service/media-protocol.js';
 
 let mainWindow: BrowserWindow | null = null;
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'aithink-media',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+      bypassCSP: true,
+      corsEnabled: true
+    }
+  }
+]);
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -87,29 +107,35 @@ ipcMain.handle('connection:checkQwen', async () => {
   try {
     const config = await loadConfig();
     const apiKey = (config as any).qwen?.apiKey;
-    const baseUrl = (config as any).qwen?.baseUrl;
+    const baseUrl = ((config as any).qwen?.baseUrl || '').trim();
 
     if (!apiKey) {
       return { status: 'error', error: '未配置 API Key' };
     }
 
-    // 真实测试：调用 baseUrl 的 /v1/models 接口验证连通性
+    // baseUrl 通常已含 /compatible-mode/v1，勿再拼一层 /v1
+    const base = (baseUrl || 'https://dashscope.aliyuncs.com/compatible-mode/v1').replace(
+      /\/+$/,
+      ''
+    );
+    const url = base.endsWith('/v1') ? `${base}/models` : `${base}/v1/models`;
+
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 3000);
-      const url = baseUrl ? `${baseUrl.replace(/\/$/, '')}/v1/models` : 'https://dashscope.aliyuncs.com/compatible-mode/v1/models';
+      const timer = setTimeout(() => ctrl.abort(), 5000);
       const resp = await fetch(url, {
-        headers: { 'Authorization': `Bearer ${apiKey}` },
-        signal: ctrl.signal,
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: ctrl.signal
       });
       clearTimeout(timer);
-      if (resp.ok || resp.status === 401) {
-        // 200 = 完全成功；401 = 服务可达但 key 错误（仍算服务可用）
-        return { status: resp.ok ? 'connected' : 'error', error: resp.ok ? undefined : 'API Key 无效' };
+      if (resp.ok) {
+        return { status: 'connected' };
+      }
+      if (resp.status === 401 || resp.status === 403) {
+        return { status: 'error', error: 'API Key 无效' };
       }
       return { status: 'error', error: `HTTP ${resp.status}` };
-    } catch (err: any) {
-      // 网络错误：服务不可达
+    } catch {
       return { status: 'error', error: '服务不可达' };
     }
   } catch (err: any) {
@@ -161,15 +187,24 @@ if (!gotTheLock) {
 }
 
 app.whenReady().then(async () => {
+  app.setName('AIThink');
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.aithink.client');
+  }
+
+  registerMediaProtocol();
+
   // 初始化配置（首次启动会创建默认配置）
   await loadConfig();
 
   // 注册 IPC 处理器
   await registerChatHandlers();
+  await registerSpaceHandlers();
   registerConfigHandlers();
   registerRecordingHandlers();
-  registerASRHandlers();
+  registerTranscriptionHandlers();
   registerSkillHandlers();
+  await reconcileInterruptedTranscriptions();
 
   // 启动 HTTP 服务（接收浏览器插件的会话同步）
   startHttpServer();
@@ -181,6 +216,18 @@ app.whenReady().then(async () => {
       createWindow();
     }
   });
+});
+
+let quitting = false;
+app.on('before-quit', async (event) => {
+  if (quitting) return;
+  event.preventDefault();
+  quitting = true;
+  try {
+    await interruptActiveTranscriptions();
+  } finally {
+    app.exit(0);
+  }
 });
 
 app.on('window-all-closed', () => {
