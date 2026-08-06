@@ -55,7 +55,7 @@
         v-html="renderedContent"
       ></div>
 
-      <!-- 用户消息携带的图片 -->
+      <!-- 用户消息携带的图片：横向滚动 -->
       <div v-if="message.images && message.images.length > 0" class="message-images">
         <img
           v-for="(imgUrl, index) in message.images"
@@ -63,6 +63,7 @@
           :src="imgUrl"
           alt="user image"
           class="message-image"
+          @click="previewImage(imgUrl)"
         />
       </div>
 
@@ -83,6 +84,14 @@
         </div>
       </details>
     </div>
+
+    <!-- 图片放大预览弹窗 -->
+    <div v-if="imagePreviewVisible" class="image-preview-overlay" @click="closeImagePreview">
+      <div class="image-preview-container">
+        <img :src="imagePreviewUrl" alt="preview" />
+        <button class="preview-close" @click="closeImagePreview" title="关闭">×</button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -99,6 +108,9 @@ const props = defineProps<{
 
 // 并发派发区块折叠状态（默认展开，用户可手动折叠）
 const dispatchCollapsed = ref(false);
+// 图片放大预览
+const imagePreviewVisible = ref(false);
+const imagePreviewUrl = ref('');
 
 /** 主界面不展示 AskUserQuestion（已在右侧面板） */
 const visibleTools = computed(() =>
@@ -144,6 +156,18 @@ const statusLabel = (status: ToolCall['status']) => {
   if (status === 'error') return '失败';
   if (status === 'running') return '进行中';
   return '等待';
+};
+
+/** 放大预览图片 */
+const previewImage = (url: string) => {
+  imagePreviewUrl.value = url;
+  imagePreviewVisible.value = true;
+};
+
+/** 关闭图片预览 */
+const closeImagePreview = () => {
+  imagePreviewVisible.value = false;
+  imagePreviewUrl.value = '';
 };
 
 const renderedContent = computed(() => {
@@ -238,12 +262,26 @@ const renderedContent = computed(() => {
   line-height: var(--leading-normal);
 }
 
-/* 用户消息携带的图片 */
+/* 用户消息携带的图片：横向滚动 */
 .message-images {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
   margin-top: 8px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.message-images::-webkit-scrollbar {
+  height: 6px;
+}
+
+.message-images::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
+}
+
+.message-images::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
 }
 
 .message-image {
@@ -253,6 +291,7 @@ const renderedContent = computed(() => {
   border: 1px solid var(--el-border-color-lighter, #ebeef5);
   cursor: pointer;
   transition: transform 0.15s ease;
+  flex-shrink: 0;
 }
 
 .message-image:hover {
@@ -261,6 +300,58 @@ const renderedContent = computed(() => {
 
 .message-bubble.user .message-image {
   border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* 图片放大预览弹窗 */
+.image-preview-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  cursor: pointer;
+}
+
+.image-preview-container {
+  position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
+  cursor: default;
+}
+
+.image-preview-container img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.preview-close {
+  position: absolute;
+  top: -40px;
+  right: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  color: #333;
+  border: none;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+}
+
+.preview-close:hover {
+  background: #fff;
 }
 
 .markdown-body :deep(pre) {

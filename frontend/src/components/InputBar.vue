@@ -35,15 +35,16 @@
         :disabled="streaming || isWaitingExternalTasks"
       />
 
-      <!-- 图片预览区 -->
+      <!-- 图片预览区：横向滚动，最多 10 张 -->
       <div v-if="pastedImages.length > 0" class="image-previews">
         <div
           v-for="(imgUrl, index) in pastedImages"
           :key="index"
           class="image-preview-item"
+          @click="previewImage(imgUrl)"
         >
           <img :src="imgUrl" alt="pasted image" />
-          <button class="image-remove" @click="removeImage(index)" title="删除">×</button>
+          <button class="image-remove" @click.stop="removeImage(index)" title="删除">×</button>
         </div>
       </div>
 
@@ -144,6 +145,14 @@
         </button>
       </div>
     </div>
+
+    <!-- 图片放大预览弹窗 -->
+    <div v-if="imagePreviewVisible" class="image-preview-overlay" @click="closeImagePreview">
+      <div class="image-preview-container">
+        <img :src="imagePreviewUrl" alt="preview" />
+        <button class="preview-close" @click="closeImagePreview" title="关闭">×</button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -167,6 +176,9 @@ const spaceQuery = ref('');
 const spacePickerRef = ref<HTMLElement | null>(null);
 // 粘贴的图片（base64 data URL）
 const pastedImages = ref<string[]>([]);
+// 图片放大预览
+const imagePreviewVisible = ref(false);
+const imagePreviewUrl = ref('');
 
 // 只锁当前会话的输入；别的会话在跑不影响这里
 const streaming = computed(() => chatStore.isStreamingActiveSession);
@@ -193,7 +205,7 @@ const handleNewSession = () => {
   ElMessage.success('已创建新对话');
 };
 
-/** 监听粘贴事件，提取图片 */
+/** 监听粘贴事件，提取图片（最多 10 张） */
 const handlePaste = (event: ClipboardEvent) => {
   const items = event.clipboardData?.items;
   if (!items) return;
@@ -201,13 +213,19 @@ const handlePaste = (event: ClipboardEvent) => {
   for (const item of Array.from(items)) {
     if (item.type.startsWith('image/')) {
       event.preventDefault();
+
+      if (pastedImages.value.length >= 10) {
+        ElMessage.warning('最多只能添加 10 张图片');
+        return;
+      }
+
       const file = item.getAsFile();
       if (!file) continue;
 
       const reader = new FileReader();
       reader.onload = (e) => {
         const dataUrl = e.target?.result as string;
-        if (dataUrl) {
+        if (dataUrl && pastedImages.value.length < 10) {
           pastedImages.value.push(dataUrl);
         }
       };
@@ -219,6 +237,18 @@ const handlePaste = (event: ClipboardEvent) => {
 /** 移除某张图片 */
 const removeImage = (index: number) => {
   pastedImages.value.splice(index, 1);
+};
+
+/** 放大预览图片 */
+const previewImage = (url: string) => {
+  imagePreviewUrl.value = url;
+  imagePreviewVisible.value = true;
+};
+
+/** 关闭图片预览 */
+const closeImagePreview = () => {
+  imagePreviewVisible.value = false;
+  imagePreviewUrl.value = '';
 };
 
 const inputPlaceholder = computed(() => {
@@ -447,12 +477,26 @@ defineExpose({ appendText });
   background: #2563eb;
 }
 
-/* 图片预览区 */
+/* 图片预览区：横向滚动，最多 10 张 */
 .image-previews {
   display: flex;
   gap: 8px;
   padding: 8px 0;
-  flex-wrap: wrap;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.image-previews::-webkit-scrollbar {
+  height: 6px;
+}
+
+.image-previews::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
+}
+
+.image-previews::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
 }
 
 .image-preview-item {
@@ -462,6 +506,13 @@ defineExpose({ appendText });
   border-radius: 6px;
   overflow: hidden;
   border: 1px solid var(--el-border-color-lighter, #ebeef5);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.image-preview-item:hover {
+  transform: scale(1.05);
 }
 
 .image-preview-item img {
@@ -487,10 +538,63 @@ defineExpose({ appendText });
   align-items: center;
   justify-content: center;
   transition: background 0.15s ease;
+  z-index: 1;
 }
 
 .image-remove:hover {
   background: rgba(0, 0, 0, 0.8);
+}
+
+/* 图片放大预览弹窗 */
+.image-preview-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  cursor: pointer;
+}
+
+.image-preview-container {
+  position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
+  cursor: default;
+}
+
+.image-preview-container img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.preview-close {
+  position: absolute;
+  top: -40px;
+  right: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  color: #333;
+  border: none;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+}
+
+.preview-close:hover {
+  background: #fff;
 }
 
 .input-container {
