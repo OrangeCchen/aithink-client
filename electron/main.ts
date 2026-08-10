@@ -10,9 +10,11 @@ import {
 } from './controller/transcription.js';
 import { registerSkillHandlers } from './controller/skill.js';
 import { registerSpaceHandlers } from './controller/space.js';
+import { registerExternalTaskHandlers } from './controller/external-task.js';
 import { loadConfig } from './service/config-service.js';
 import { startHttpServer, getLastExtensionPing } from './service/http-server.js';
 import { registerMediaProtocol } from './service/media-protocol.js';
+import { shutdownExternalTaskExecutor } from './service/external-task-executor.js';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -204,6 +206,7 @@ app.whenReady().then(async () => {
   registerRecordingHandlers();
   registerTranscriptionHandlers();
   registerSkillHandlers();
+  registerExternalTaskHandlers();
   await reconcileInterruptedTranscriptions();
 
   // 启动 HTTP 服务（接收浏览器插件的会话同步）
@@ -225,6 +228,7 @@ app.on('before-quit', async (event) => {
   quitting = true;
   try {
     await interruptActiveTranscriptions();
+    await shutdownExternalTaskExecutor();
   } finally {
     app.exit(0);
   }

@@ -38,7 +38,9 @@
             type="textarea"
             :autosize="{ minRows: 1, maxRows: 4 }"
             placeholder="继续对话..."
-            @keydown.enter.exact.prevent="handleSend"
+            @compositionstart="isComposing = true"
+            @compositionend="isComposing = false"
+            @keydown.enter.exact="onEnterKeydown"
             :disabled="streaming"
           />
           <button
@@ -69,6 +71,7 @@ const modelStore = useModelStore();
 const visible = ref(false);
 const messages = ref<Message[]>([]);
 const inputText = ref('');
+const isComposing = ref(false);
 const streaming = ref(false);
 const streamBuffer = ref('');
 const messagesRef = ref<HTMLElement>();
@@ -116,6 +119,12 @@ const handleSend = async () => {
 
   await sendMessage(text);
   inputText.value = '';
+};
+
+const onEnterKeydown = (event: KeyboardEvent) => {
+  if (event.isComposing || isComposing.value || event.keyCode === 229) return;
+  event.preventDefault();
+  handleSend();
 };
 
 const sendMessage = async (prompt: string) => {

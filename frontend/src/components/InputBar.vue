@@ -31,7 +31,9 @@
         :placeholder="inputPlaceholder"
         @input="onInput"
         @paste="handlePaste"
-        @keydown.enter.exact.prevent="handleSend"
+        @compositionstart="isComposing = true"
+        @compositionend="isComposing = false"
+        @keydown.enter.exact="onEnterKeydown"
         :disabled="streaming || isWaitingExternalTasks"
       />
 
@@ -108,6 +110,28 @@
               :value="model.value"
             />
           </el-select>
+          <el-select v-model="dispatchMode" size="small" class="dispatch-mode-select" title="对话模式">
+            <el-option value="local" label="本机对话" />
+            <el-option value="external" label="外部 App" />
+          </el-select>
+          <el-select
+            v-if="dispatchMode === 'external'"
+            v-model="externalAppTargets"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            size="small"
+            class="dispatch-target-select"
+            title="并发派发到多个 App"
+            placeholder="选择 App"
+          >
+            <el-option
+              v-for="opt in externalAppOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
           <button class="tool-btn" @click="handleAttachment" title="附件">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8">
               <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
@@ -135,8 +159,8 @@
           v-else
           class="send-btn"
           @click="handleSend"
-          :disabled="!inputText.trim()"
-          title="发送 (Enter)"
+          :disabled="!inputText.trim() || isWaitingExternalTasks"
+          :title="sendButtonTitle"
         >
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="22" y1="2" x2="11" y2="13"></line>
@@ -163,6 +187,7 @@ import { useModelStore } from '@/stores/model';
 import { useSkillStore } from '@/stores/skill';
 import { useSpaceStore } from '@/stores/space';
 import { ElMessage } from 'element-plus';
+import type { ExternalAppId } from '@shared/types';
 
 const chatStore = useChatStore();
 const modelStore = useModelStore();
@@ -170,6 +195,7 @@ const skillStore = useSkillStore();
 const spaceStore = useSpaceStore();
 
 const inputText = ref('');
+const isComposing = ref(false);
 const textareaRef = ref();
 const spaceMenuOpen = ref(false);
 const spaceQuery = ref('');
@@ -251,12 +277,47 @@ const closeImagePreview = () => {
   imagePreviewUrl.value = '';
 };
 
+const externalAppOptions: Array<{ value: ExternalAppId; label: string }> = [
+  { value: 'doubao', label: '豆包' },
+  { value: 'qwenworkcn', label: '千问Work' },
+  { value: 'workbuddy', label: 'WorkBuddy' }
+];
+
+const dispatchMode = computed({
+  get: () => chatStore.dispatchMode,
+  set: (val: 'local' | 'external') => chatStore.setDispatchMode(val)
+});
+
+const externalAppTargets = computed({
+  get: () => chatStore.externalAppTargets,
+  set: (val: ExternalAppId[]) => chatStore.setExternalAppTargets(val)
+});
+
+const selectedExternalLabel = computed(() => {
+  const labels = externalAppTargets.value
+    .map((id) => externalAppOptions.find((o) => o.value === id)?.label)
+    .filter(Boolean);
+  if (labels.length === 0) return '外部 App';
+  if (labels.length === 1) return labels[0];
+  return `${labels.length} 个 App`;
+});
+
 const inputPlaceholder = computed(() => {
   if (isWaitingExternalTasks.value) {
     const { pending, completed, total } = waitingTasksCount.value;
     return `⏳ 等待外部任务 (${completed}/${total} 已完成，${pending} 进行中)`;
   }
+  if (dispatchMode.value === 'external') {
+    return `输入问题，Enter 并发派发到 ${selectedExternalLabel.value}（完成后自动汇总）`;
+  }
   return '今天帮你做些什么？/ 调用已安装技能';
+});
+
+const sendButtonTitle = computed(() => {
+  if (dispatchMode.value === 'external') {
+    return `并发派发到 ${selectedExternalLabel.value} (Enter)`;
+  }
+  return '发送 (Enter)，Shift+Enter 换行';
 });
 
 const spaces = computed(() => spaceStore.spaces);
@@ -398,13 +459,31 @@ const selectedModel = computed({
 
 const availableModels = computed(() => modelStore.availableModels);
 
+
 const handleSend = async () => {
   const text = inputText.value.trim();
-  if (!text || streaming.value) return;
-  const images = pastedImages.value.length > 0 ? [...pastedImages.value] : undefined;
-  await chatStore.sendMessage(text, selectedModel.value, images);
+  if (!text || streaming.value || isWaitingExternalTasks.value) return;
+
+  if (dispatchMode.value === 'external') {
+    if (externalAppTargets.value.length === 0) {
+      ElMessage.warning('请至少选择一个外部 App');
+      return;
+    }
+    await chatStore.dispatchToExternalApp(text, selectedModel.value);
+  } else {
+    const images = pastedImages.value.length > 0 ? [...pastedImages.value] : undefined;
+    await chatStore.sendMessage(text, selectedModel.value, images);
+  }
+
   inputText.value = '';
   pastedImages.value = [];
+};
+
+/** Enter 发送；IME 组字/选词时的回车不拦截 */
+const onEnterKeydown = (event: KeyboardEvent) => {
+  if (event.isComposing || isComposing.value || event.keyCode === 229) return;
+  event.preventDefault();
+  handleSend();
 };
 
 const handleStop = async () => {
@@ -480,10 +559,14 @@ defineExpose({ appendText });
 /* 图片预览区：横向滚动，最多 10 张 */
 .image-previews {
   display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 8px;
   padding: 8px 0;
   overflow-x: auto;
-  white-space: nowrap;
+  /* 不显式关掉纵向，overflow-y:visible 会被规范提升为 auto，冒出竖滚动条 */
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
 }
 
 .image-previews::-webkit-scrollbar {
@@ -506,13 +589,15 @@ defineExpose({ appendText });
   border-radius: 6px;
   overflow: hidden;
   border: 1px solid var(--el-border-color-lighter, #ebeef5);
-  flex-shrink: 0;
+  flex: 0 0 auto;
   cursor: pointer;
-  transition: transform 0.15s ease;
+  /* 只过渡不参与布局的属性：scale 会撑大滚动区域导致抖动 */
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .image-preview-item:hover {
-  transform: scale(1.05);
+  border-color: var(--color-accent, #3b82f6);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
 }
 
 .image-preview-item img {
@@ -816,6 +901,41 @@ defineExpose({ appendText });
   width: 120px;
   margin-right: 2px;
   flex-shrink: 0;
+}
+
+.dispatch-mode-select {
+  width: 108px;
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+
+.dispatch-target-select {
+  width: 168px;
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+
+.dispatch-btn {
+  height: 32px;
+  padding: 0 12px;
+  margin-right: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-soft);
+  color: var(--color-text-primary);
+  font-size: var(--font-sm);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.dispatch-btn:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  border-color: var(--color-text-tertiary);
+}
+
+.dispatch-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .tool-btn {

@@ -29,7 +29,20 @@
                 <span class="task-app">{{ task.appName }}</span>
                 <span class="task-status-badge">{{ taskStatusLabel(task.status) }}</span>
               </div>
-              <div class="task-prompt">{{ task.prompt }}</div>
+              <div class="task-prompt">
+                <span class="task-prompt-label">输入内容</span>
+                {{ task.prompt }}
+              </div>
+              <div v-if="task.status === 'failed' && task.error" class="task-inline-error">
+                {{ task.error }}
+              </div>
+              <div v-if="task.status === 'completed'" class="task-result-block">
+                <div class="task-result-label">执行结果</div>
+                <div v-if="task.result" class="task-inline-result">{{ task.result }}</div>
+                <div v-else class="task-inline-result task-result-empty">
+                  未抽取到回复内容，请在 {{ task.appName }} 内查看
+                </div>
+              </div>
               <details v-if="task.logs && task.logs.length > 0" class="task-logs">
                 <summary>进度 ({{ task.logs.length }})</summary>
                 <div
@@ -52,8 +65,11 @@
       <div
         v-else-if="message.content"
         class="markdown-body"
-        v-html="renderedContent"
-      ></div>
+        :class="{ 'streaming-plain': streaming }"
+      >
+        <div v-if="streaming" class="streaming-text">{{ message.content }}</div>
+        <div v-else v-html="renderedContent"></div>
+      </div>
 
       <!-- 用户消息携带的图片：横向滚动 -->
       <div v-if="message.images && message.images.length > 0" class="message-images">
@@ -71,15 +87,24 @@
       <details
         v-if="visibleTools.length > 0"
         class="work-summary"
+        :open="isTerminatedMessage"
       >
         <summary>
-          已完成 {{ visibleTools.length }} 步工作
-          <span class="work-hint">点击查看</span>
+          {{ workSummaryTitle }}
+          <span v-if="!isTerminatedMessage" class="work-hint">点击查看</span>
         </summary>
         <div class="work-list">
           <div v-for="tool in visibleTools" :key="tool.id" class="work-item">
-            <span class="work-name">{{ friendlyToolName(tool.name) }}</span>
-            <span class="work-status" :class="tool.status">{{ statusLabel(tool.status) }}</span>
+            <div class="work-item-head">
+              <span class="work-name">{{ friendlyToolName(tool.name) }}</span>
+              <span class="work-status" :class="tool.status">{{ statusLabel(tool.status) }}</span>
+            </div>
+            <div v-if="formatToolInputPreview(tool.name, tool.input)" class="work-input">
+              {{ formatToolInputPreview(tool.name, tool.input) }}
+            </div>
+            <div v-if="formatToolOutputPreview(tool.output)" class="work-output">
+              {{ formatToolOutputPreview(tool.output) }}
+            </div>
           </div>
         </div>
       </details>
@@ -101,9 +126,16 @@ import { marked } from 'marked';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
 import type { Message, ToolCall } from '@shared/types';
+import {
+  friendlyToolName,
+  formatToolInputPreview,
+  formatToolOutputPreview
+} from '@/utils/toolPreview';
 
 const props = defineProps<{
   message: Message;
+  /** 流式阶段用纯文本渲染，避免 markdown 反复重排导致高度抖动 */
+  streaming?: boolean;
 }>();
 
 // 并发派发区块折叠状态（默认展开，用户可手动折叠）
@@ -117,20 +149,30 @@ const visibleTools = computed(() =>
   (props.message.toolCalls || []).filter((t) => t.name !== 'AskUserQuestion')
 );
 
-const friendlyToolName = (name: string) => {
-  const map: Record<string, string> = {
-    Read: '阅读文件',
-    Write: '写入文件',
-    Bash: '运行命令',
-    Glob: '查找文件',
-    Skill: '加载技能'
-  };
-  return map[name] || name;
-};
-
-const blockIcon = computed(() =>
-  props.message.kind === 'task-result' ? '✅' : '🚀'
+const isTerminatedMessage = computed(() =>
+  Boolean(props.message.content?.includes('（已终止）'))
 );
+
+const workSummaryTitle = computed(() => {
+  const n = visibleTools.value.length;
+  if (isTerminatedMessage.value) {
+    return `已终止 · 共 ${n} 步（含已中断步骤）`;
+  }
+  return `已完成 ${n} 步工作`;
+});
+
+const blockIcon = computed(() => {
+  const title = props.message.blockTitle || '';
+  if (props.message.kind === 'task-result') {
+    if (title.includes('失败') || title.includes('已取消')) return '❌';
+    return '✅';
+  }
+  if (props.message.kind === 'dispatch') {
+    if (title.includes('失败') || title.includes('已取消')) return '❌';
+    if (title.includes('已完成')) return '✅';
+  }
+  return '🚀';
+});
 
 const defaultBlockTitle = computed(() =>
   props.message.kind === 'task-result' ? '任务结果' : '任务派发'
@@ -253,6 +295,24 @@ const renderedContent = computed(() => {
   overflow-wrap: break-word;
 }
 
+.streaming-plain {
+  min-height: 1.65em;
+}
+
+.streaming-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.streaming-plain {
+  min-height: 1.65em;
+}
+
+.streaming-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .message-bubble.user .markdown-body {
   padding: 10px 14px;
   background: var(--color-accent);
@@ -265,10 +325,15 @@ const renderedContent = computed(() => {
 /* 用户消息携带的图片：横向滚动 */
 .message-images {
   display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
   gap: 8px;
   margin-top: 8px;
   overflow-x: auto;
-  white-space: nowrap;
+  /* 不显式关掉纵向，overflow-y:visible 会被规范提升为 auto，冒出竖滚动条 */
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  max-width: 100%;
 }
 
 .message-images::-webkit-scrollbar {
@@ -290,16 +355,25 @@ const renderedContent = computed(() => {
   border-radius: 8px;
   border: 1px solid var(--el-border-color-lighter, #ebeef5);
   cursor: pointer;
-  transition: transform 0.15s ease;
-  flex-shrink: 0;
+  /* 只过渡不参与布局的属性：scale 会撑大滚动区域导致抖动 */
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  flex: 0 0 auto;
 }
 
 .message-image:hover {
-  transform: scale(1.05);
+  border-color: var(--color-accent, #3b82f6);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
 }
 
 .message-bubble.user .message-image {
   border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* 用户气泡是 align-items:flex-end + width:auto，滚动容器会被内容撑开而不是内部滚动，
+   这里强制占满气泡宽度，图片才会在气泡内横向滚动 */
+.message-bubble.user .message-images {
+  align-self: stretch;
+  min-width: 0;
 }
 
 /* 图片放大预览弹窗 */
@@ -460,8 +534,37 @@ const renderedContent = computed(() => {
 
 .work-item {
   display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--color-border);
+}
+
+.work-item:last-child {
+  border-bottom: none;
+}
+
+.work-item-head {
+  display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.work-input,
+.work-output {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  word-break: break-all;
+  padding-left: 2px;
+}
+
+.work-input {
+  color: var(--color-text-tertiary);
+}
+
+.work-output {
+  color: var(--color-text-muted);
 }
 
 .work-name {
@@ -625,11 +728,56 @@ const renderedContent = computed(() => {
   color: #721c24;
 }
 
+.task-inline-error {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #c0392b;
+  line-height: 1.5;
+}
+
+.task-inline-result {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--color-text-primary, #222);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.task-result-block {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #c8e6c9;
+  border-radius: 8px;
+  background: #f6fff7;
+}
+
+.task-result-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #2e7d32;
+  margin-bottom: 6px;
+  letter-spacing: 0.02em;
+}
+
+.task-result-empty {
+  color: #888;
+  font-style: italic;
+}
+
 .task-prompt {
   font-size: 12px;
   color: #555;
   margin-bottom: 8px;
   line-height: 1.4;
+}
+
+.task-prompt-label {
+  display: block;
+  font-size: 10px;
+  color: #999;
+  margin-bottom: 2px;
 }
 
 .task-logs {

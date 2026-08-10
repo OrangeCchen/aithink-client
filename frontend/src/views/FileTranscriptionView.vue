@@ -415,6 +415,7 @@
                 type="text"
                 maxlength="120"
                 placeholder="例如：周一晨会听写"
+                :disabled="dictationSubmitting"
               />
             </label>
             <label class="dictation-field grow">
@@ -422,21 +423,21 @@
               <textarea
                 v-model="dictationText"
                 class="dictation-textarea"
-                :disabled="minutesBusy"
+                :disabled="dictationSubmitting"
                 spellcheck="false"
                 placeholder="从语音备忘录复制听写文本并粘贴到这里。系统会清理填充词与噪音碎片，并整理多人讨论后生成会议纪要。"
               ></textarea>
             </label>
             <p class="setup-hint">
-              无需本地 Whisper 模型。适合备忘录听写、多人交错与口误较多的文本。有转写任务进行中也可直接生成。
+              无需本地 Whisper 模型。本地音视频转写排队不影响听写；云端纪要可并行生成。
             </p>
             <button
               type="button"
               class="btn-primary"
-              :disabled="minutesBusy || !dictationText.trim()"
+              :disabled="dictationSubmitting || !dictationText.trim()"
               @click="startDictationMinutes"
             >
-              {{ minutesBusy ? '生成中…' : '生成会议纪要' }}
+              {{ dictationSubmitting ? '生成中…' : '生成会议纪要' }}
             </button>
           </div>
         </template>
@@ -795,7 +796,6 @@ const {
   hydrated,
   busy,
   minutesBusy,
-  minutesActiveId,
   activeTask,
   error,
   chooseModel,
@@ -826,6 +826,8 @@ type SetupMode = 'media' | 'dictation';
 const setupMode = ref<SetupMode>('media');
 const dictationTitle = ref('');
 const dictationText = ref('');
+/** 仅本条听写提交中；不与其它记录的纪要/转写互斥 */
+const dictationSubmitting = ref(false);
 
 function isDictationRecord(record?: TranscriptionRecord | null) {
   if (!record) return false;
@@ -1078,11 +1080,11 @@ const renderedMinutes = computed(() => {
   return sanitizeRichHtml(rawHtml);
 });
 
-/** 仅在本条纪要生成/润色时锁定；勿用全局 busy，否则任意转写都会导致无法编辑 */
+/** 仅锁定当前这条的纪要操作；其它记录的转写/纪要不影响编辑 */
 const minutesEditorLocked = computed(
   () =>
     selectionRewriting.value
-    || (Boolean(current.value?.id) && minutesActiveId.value === current.value?.id)
+    || minutesBusy.value
     || (busy.value && activeTask.value?.id === current.value?.id)
 );
 
@@ -1260,23 +1262,28 @@ async function startCurrentTranscription() {
 
 async function startDictationMinutes() {
   const text = dictationText.value.trim();
-  if (!text || minutesBusy.value) return;
-  const record = await createFromText(text, dictationTitle.value.trim() || undefined);
-  if (!record) return;
-  dictationTitle.value = '';
-  dictationText.value = '';
-  await openRecord(record);
-  transcriptDraft.value = record.transcript;
-  minutesSourceTranscript.value = record.transcript;
-  await generateMinutes(record.transcript);
-  if (error.value && !current.value?.minutes) {
-    ElMessage.error(error.value);
-    return;
-  }
-  minutesSourceTranscript.value = transcriptDraft.value;
-  minutesViewKey.value += 1;
-  if (current.value?.minutes) {
-    ElMessage.success('会议纪要已生成');
+  if (!text || dictationSubmitting.value) return;
+  dictationSubmitting.value = true;
+  try {
+    const record = await createFromText(text, dictationTitle.value.trim() || undefined);
+    if (!record) return;
+    dictationTitle.value = '';
+    dictationText.value = '';
+    await openRecord(record);
+    transcriptDraft.value = record.transcript;
+    minutesSourceTranscript.value = record.transcript;
+    await generateMinutes(record.transcript);
+    if (error.value && !current.value?.minutes) {
+      ElMessage.error(error.value);
+      return;
+    }
+    minutesSourceTranscript.value = transcriptDraft.value;
+    minutesViewKey.value += 1;
+    if (current.value?.minutes) {
+      ElMessage.success('会议纪要已生成');
+    }
+  } finally {
+    dictationSubmitting.value = false;
   }
 }
 

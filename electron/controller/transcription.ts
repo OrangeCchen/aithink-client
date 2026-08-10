@@ -572,6 +572,11 @@ export function registerTranscriptionHandlers(): void {
         record.error = undefined;
         updateProgress(record, 'completed', 100, '纪要已按意见修改');
         await saveTranscriptionRecord(record);
+        notifyDesktop({
+          title: '纪要已修订',
+          subtitle: record.fileName.replace(/\.[^.]+$/, '') || record.fileName,
+          body: `「${record.fileName.replace(/\.[^.]+$/, '') || record.fileName}」已按意见更新`
+        });
         return record;
       } catch (error: any) {
         if (controller.signal.aborted || error?.name === 'AbortError') {
@@ -584,6 +589,11 @@ export function registerTranscriptionHandlers(): void {
             100,
             record.error || '全局修改失败'
           );
+          notifyDesktop({
+            title: '纪要修订失败',
+            subtitle: record.fileName.replace(/\.[^.]+$/, '') || record.fileName,
+            body: record.error || '全局修改失败'
+          });
         }
         await saveTranscriptionRecord(record);
         throw error;

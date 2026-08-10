@@ -10,11 +10,15 @@ export function useAgentStream() {
   let unsubscribe: (() => void) | null = null;
 
   const handleStreamEvent = (event: StreamEvent) => {
-    if (event.type === 'text_delta') {
+    if (event.type === 'phase') {
+      chatStore.setStreamPhase(event.data.phase || null);
+    } else if (event.type === 'text_delta') {
+      chatStore.setStreamPhase(null);
       chatStore.appendTextDelta(event.data.delta || '');
     } else if (event.type === 'text_replace') {
       chatStore.streamBuffer = event.data.delta || '';
     } else if (event.type === 'tool_use') {
+      chatStore.setStreamPhase('running_tools');
       chatStore.addToolCall({
         id: event.data.toolId,
         name: event.data.toolName,

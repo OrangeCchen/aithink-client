@@ -15,14 +15,30 @@ function focusAppWindow(): void {
   window.focus();
 }
 
+/** AppleScript 字符串字面量：用 " 包裹，内部 " 写成 "" */
+function appleScriptString(value: string): string {
+  return `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '""')}"`;
+}
+
+/** 通知正文压成单行，避免 osascript / 系统横幅对换行不友好 */
+function flattenNotifyText(value: string, maxLen = 220): string {
+  const flat = value.replace(/\s+/g, ' ').trim();
+  if (flat.length <= maxLen) return flat;
+  return `${flat.slice(0, maxLen - 1)}…`;
+}
+
 function notifyViaOsascript(payload: DesktopNotifyPayload): void {
   if (process.platform !== 'darwin') return;
+  const title = flattenNotifyText(payload.title, 80);
+  const body = flattenNotifyText(payload.body, 220);
+  const subtitle = payload.subtitle ? flattenNotifyText(payload.subtitle, 80) : '';
+
   const parts = [
-    `display notification ${JSON.stringify(payload.body)}`,
-    `with title ${JSON.stringify(payload.title)}`
+    `display notification ${appleScriptString(body)}`,
+    `with title ${appleScriptString(title)}`
   ];
-  if (payload.subtitle) {
-    parts.push(`subtitle ${JSON.stringify(payload.subtitle)}`);
+  if (subtitle) {
+    parts.push(`subtitle ${appleScriptString(subtitle)}`);
   }
   execFile('osascript', ['-e', parts.join(' ')], (error) => {
     if (error) console.warn('[desktop-notify] osascript failed:', error.message);
@@ -30,11 +46,16 @@ function notifyViaOsascript(payload: DesktopNotifyPayload): void {
 }
 
 /**
- * 系统通知：Electron Notification + macOS osascript 双通道。
- * 开发态前台时常被系统抑制横幅，osascript / Dock 弹跳作为兜底。
+ * 仅系统通知：Electron Notification + macOS osascript。
+ * 不做应用内弹层；开发态前台时系统可能抑制横幅，可用 Dock 弹跳兜底。
  */
 export function notifyDesktop(payload: DesktopNotifyPayload): void {
-  const { title, body, subtitle } = payload;
+  const title = payload.title.trim() || 'AIThink';
+  const body = flattenNotifyText(payload.body || '');
+  const subtitle = payload.subtitle ? flattenNotifyText(payload.subtitle, 80) : undefined;
+  const normalized = { title, body, subtitle };
+
+  console.log('[desktop-notify]', title, subtitle || '', body.slice(0, 80));
 
   try {
     if (Notification.isSupported()) {
@@ -57,7 +78,7 @@ export function notifyDesktop(payload: DesktopNotifyPayload): void {
     } catch {
       // ignore
     }
-    notifyViaOsascript(payload);
+    notifyViaOsascript(normalized);
   }
 }
 
@@ -118,11 +139,12 @@ export function buildMinutesDoneNotify(fileName: string, minutes: string): Deskt
     };
   }
 
-  const listed = items.map((item, index) => `${index + 1}. ${item}`).join('\n');
-  const more = minutes.includes('行动项') && items.length >= 4 ? '\n…' : '';
+  // 单行拼接，避免 osascript 多行转义踩坑
+  const listed = items.map((item, index) => `${index + 1}.${item}`).join('；');
+  const more = minutes.includes('行动项') && items.length >= 4 ? '…' : '';
   return {
     title,
     subtitle,
-    body: `行动项：\n${listed}${more}`
+    body: `行动项：${listed}${more}`
   };
 }

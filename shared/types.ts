@@ -117,7 +117,8 @@ export interface StreamEvent {
     | 'tool_result'
     | 'done'
     | 'error'
-    | 'ask_user_question';
+    | 'ask_user_question'
+    | 'phase';
   sessionId: string;
   data: {
     delta?: string;
@@ -128,6 +129,8 @@ export interface StreamEvent {
     error?: string;
     /** ask_user_question */
     questions?: AskUserQuestionItem[];
+    /** phase 事件：syncing_skills | calling_model */
+    phase?: string;
     /** 用户主动终止 */
     cancelled?: boolean;
   };
@@ -173,22 +176,35 @@ export const DEFAULT_CONFIG: AppConfig = {
 };
 
 /** 外部 App 标识 */
-export type ExternalAppId = 'qoderwork' | 'qwenworkcn' | 'workbuddy';
+export type ExternalAppId = 'doubao' | 'qwenworkcn' | 'workbuddy';
 
-/** 外部任务：派发到外部 App(QoderWork/千问Work/WorkBuddy)执行的任务 */
+/** 输入栏派发目标：本机对话或外部 App */
+export type DispatchTarget = 'local' | ExternalAppId;
+
+/** 外部任务状态 */
+export type ExternalTaskStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+/** 外部任务：派发到外部 App(豆包/千问Work/WorkBuddy)执行的任务 */
 export interface ExternalTask {
   id: string;
   /** 所属会话(发起派发的主会话) */
   sessionId: string;
   /** 目标 App */
   appId: ExternalAppId;
-  appName: string; // 'QoderWork' | '千问Work' | 'WorkBuddy'
+  appName: string; // '豆包' | '千问Work' | 'WorkBuddy'
   /** 任务描述 */
   prompt: string;
   /** 触发派发的用户消息 ID（用于定位回原始问题） */
   triggerMessageId?: string;
+  /** 同一轮并发派发的批次 ID（多 App 汇总用） */
+  batchId?: string;
   /** 任务状态 */
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: ExternalTaskStatus;
   /** 执行进度 0-100 */
   progress?: number;
   /** 创建时间 */
@@ -201,6 +217,42 @@ export interface ExternalTask {
   logs?: Array<{ time: number; message: string }>;
   /** 结果(completed 时) */
   result?: string;
-  /** 错误信息(failed 时) */
+  /** 错误信息(failed / cancelled 时) */
   error?: string;
+}
+
+/** 适配器轮询状态（与 UI ExternalTaskStatus 解耦） */
+export type AdapterPollState = 'running' | 'completed' | 'failed';
+
+export interface AdapterDispatchHandle {
+  taskId: string;
+  /** 派发前已有的助手消息数，用于识别新回复 */
+  assistantCountBefore: number;
+  /** 派发时记下的最后一条助手消息 id（可选） */
+  lastAssistantIdBefore?: string | null;
+}
+
+export interface AdapterPollResult {
+  state: AdapterPollState;
+  progress?: number;
+  message?: string;
+  error?: string;
+}
+
+export interface AppAdapter {
+  readonly appId: ExternalAppId;
+  readonly driver: 'a11y' | 'vision';
+  ensureReady(): Promise<void>;
+  dispatch(task: { id: string; prompt: string }): Promise<AdapterDispatchHandle>;
+  poll(handle: AdapterDispatchHandle): Promise<AdapterPollResult>;
+  getResult(handle: AdapterDispatchHandle): Promise<string>;
+  cancel?(handle: AdapterDispatchHandle): Promise<void>;
+}
+
+/** 外部任务超时等运行时配置（env 可覆盖） */
+export interface ExternalAppRuntimeConfig {
+  externalTaskTimeoutMs: number;
+  doubaoBundleId: string;
+  qwenworkcnBundleId: string;
+  workbuddyBundleId: string;
 }

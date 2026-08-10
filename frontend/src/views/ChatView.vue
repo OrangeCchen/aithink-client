@@ -28,15 +28,21 @@
           :data-message-id="message.id"
           class="message-wrapper"
         />
-        <!-- 有正文时流式展示；有工具但尚无正文 → 深度思考过渡 -->
-        <div v-if="streaming && streamBuffer.trim()" class="streaming-message">
-          <MessageBubble :message="streamingMessage" />
-        </div>
-        <ThinkingIndicator
-          v-else-if="streaming"
-          :label="thinkingLabel"
-          :detail="thinkingDetail"
-        />
+        <!-- 流式：正文 + 工具/等待进度可同时展示 -->
+        <template v-if="streaming">
+          <div v-if="streamBuffer.trim()" class="streaming-message">
+            <MessageBubble :message="streamingMessage" :streaming="true" />
+          </div>
+          <ThinkingIndicator
+            v-if="showStreamingProgress"
+            :label="thinkingLabel"
+            :detail="thinkingDetail"
+            :tool-calls="chatStore.currentToolCalls"
+            :stream-phase="chatStore.streamPhase"
+            :phase="runningTool ? 'tooling' : 'organizing'"
+            :compact="Boolean(streamBuffer.trim())"
+          />
+        </template>
       </div>
 
       <!-- 划词浮动工具栏 -->
@@ -80,6 +86,7 @@ import SideChatPanel from '@/components/SideChatPanel.vue';
 import ExternalTaskView from '@/views/ExternalTaskView.vue';
 import { useAgentStream } from '@/composables/useAgentStream';
 import { ElMessage } from 'element-plus';
+import { formatToolInputPreview } from '@/utils/toolPreview';
 
 const chatStore = useChatStore();
 const messageListRef = ref<HTMLElement | null>(null);
@@ -130,21 +137,36 @@ const runningTool = computed(() =>
 
 const thinkingLabel = computed(() => {
   if (runningTool.value) return '深度思考中';
+  if (chatStore.streamPhase === 'running_tools') return '执行工具';
+  if (chatStore.streamPhase === 'syncing_skills') return '准备环境';
+  if (chatStore.streamPhase === 'calling_model') return '连接模型';
   return '正在组织回复';
 });
+
+/** 有首字后继续执行工具 / 等模型时也要展示进度 */
+const showStreamingProgress = computed(() => {
+  if (!streaming.value) return false;
+  if (!streamBuffer.value.trim()) return true;
+  if (runningTool.value) return true;
+  if (chatStore.streamPhase) return true;
+  return chatStore.currentToolCalls.some(
+    (t) => t.status === 'running' || t.status === 'pending'
+  );
+});
+
+let scrollRaf: number | null = null;
+const scheduleScrollToBottom = () => {
+  if (scrollRaf !== null) return;
+  scrollRaf = window.requestAnimationFrame(() => {
+    scrollRaf = null;
+    scrollToBottom();
+  });
+};
 
 const thinkingDetail = computed(() => {
   const t = runningTool.value;
   if (!t) return '';
-  const map: Record<string, string> = {
-    Read: '查阅资料',
-    Write: '整理产出',
-    Bash: '处理中',
-    Glob: '查找文件',
-    Skill: '加载技能',
-    AskUserQuestion: '准备问题'
-  };
-  return map[t.name] || '';
+  return formatToolInputPreview(t.name, t.input, 160);
 });
 
 // 自动滚动到底部
@@ -187,7 +209,7 @@ watch(
 );
 
 watch([messages, streamBuffer], () => {
-  scrollToBottom();
+  scheduleScrollToBottom();
 }, { deep: true });
 
 // 处理文本选择
@@ -343,16 +365,11 @@ onUnmounted(() => {
 }
 
 .streaming-message {
-  animation: fadeIn 0.3s;
+  /* 避免 fadeIn 动画在流式更新时反复触发导致高度跳动 */
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
+.streaming-message :deep(.message-bubble) {
+  margin-bottom: 8px;
 }
 
 /* 划词浮动工具栏 */

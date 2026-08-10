@@ -41,7 +41,12 @@ function apiRoot(baseUrl: string): string {
   return `${b}/v1`;
 }
 
+function emitPhase(opts: AnthropicLoopOptions, phase: string): void {
+  opts.emit({ type: 'phase', sessionId: opts.sessionId, data: { phase } });
+}
+
 export async function runAnthropicLoop(opts: AnthropicLoopOptions): Promise<void> {
+  emitPhase(opts, 'syncing_skills');
   const skills = await syncAndListSkills(opts.workspacePath);
   const system = buildSystemPrompt(skills);
   const tools = toAnthropicTools();
@@ -80,6 +85,7 @@ export async function runAnthropicLoop(opts: AnthropicLoopOptions): Promise<void
   for (let round = 0; round < maxRounds; round++) {
     if (opts.signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
+    emitPhase(opts, 'calling_model');
     const url = `${apiRoot(opts.baseUrl)}/messages`;
     const resp = await fetch(url, {
       method: 'POST',
@@ -137,6 +143,7 @@ export async function runAnthropicLoop(opts: AnthropicLoopOptions): Promise<void
       return;
     }
 
+    emitPhase(opts, 'running_tools');
     const toolResults: any[] = [];
     for (const tu of toolUses) {
       const { output } = await runTool(tu.name, tu.input, toolCtx, tu.id);
@@ -217,6 +224,17 @@ async function consumeAnthropicStream(
               inputJson: '',
               input: {}
             };
+            if (currentTool.name) {
+              emit({
+                type: 'tool_use',
+                sessionId,
+                data: {
+                  toolId: currentTool.id,
+                  toolName: currentTool.name,
+                  toolInput: '{}'
+                }
+              });
+            }
           }
           break;
         }

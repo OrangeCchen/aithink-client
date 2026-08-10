@@ -8,18 +8,19 @@
   "scripts": {
     "dev": "concurrently -k -n vite,electron \"npm:dev:frontend\" \"npm:dev:electron\"",
     "dev:frontend": "cd frontend && npm run dev",
-    "dev:electron": "tsc -p tsconfig.node.json && wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .",
-    "build:electron": "tsc -p tsconfig.node.json",
+    "dev:electron": "npm run build:computer-use && tsc -p tsconfig.node.json && wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .",
+    "build:electron": "npm run build:computer-use && tsc -p tsconfig.node.json",
     "build:frontend": "cd frontend && npm run build",
     "build": "npm run build:electron && npm run build:frontend",
-    "package": "npm run build && electron-builder"
+    "package": "npm run build && electron-builder",
+    "build:computer-use": "swiftc -O -o native/mac-computer-use/mac-computer-use native/mac-computer-use/Sources/main.swift -framework AppKit -framework ApplicationServices -framework Cocoa"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "whisper-cpp-node": "^0.2.12"
   },
   "devDependencies": {
-    "@types/node": "^20.14.0",
+    "@types/node": "^20.19.43",
     "concurrently": "^9.1.0",
     "cross-env": "^7.0.3",
     "electron": "^33.0.2",

@@ -62,6 +62,50 @@ function collapseAskDuplicateText(
   return ASK_PANEL_HINT;
 }
 
+
+function emitPhase(opts: OpenAILoopOptions, phase: string): void {
+  opts.emit({ type: 'phase', sessionId: opts.sessionId, data: { phase } });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** 非流式响应按小块推送，避免「沉默后突然一大段」 */
+async function emitContentAsDeltas(
+  opts: OpenAILoopOptions,
+  content: string
+): Promise<void> {
+  if (!content) return;
+  const chunkSize = 16;
+  for (let i = 0; i < content.length; i += chunkSize) {
+    if (opts.signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    opts.emit({
+      type: 'text_delta',
+      sessionId: opts.sessionId,
+      data: { delta: content.slice(i, i + chunkSize) }
+    });
+    await sleep(12);
+  }
+}
+
+function emitToolPreview(
+  emit: (e: StreamEvent) => void,
+  sessionId: string,
+  acc: StreamToolCall
+): void {
+  if (!acc.name) return;
+  emit({
+    type: 'tool_use',
+    sessionId,
+    data: {
+      toolId: acc.id,
+      toolName: acc.name,
+      toolInput: acc.arguments || '{}'
+    }
+  });
+}
+
 function joinUrl(base: string, path: string): string {
   const b = base.replace(/\/+$/, '');
   if (b.endsWith('/v1') && path.startsWith('/v1/')) {
@@ -72,6 +116,7 @@ function joinUrl(base: string, path: string): string {
 }
 
 export async function runOpenAICompatibleLoop(opts: OpenAILoopOptions): Promise<void> {
+  emitPhase(opts, 'syncing_skills');
   const skills = await syncAndListSkills(opts.workspacePath);
   const system = buildSystemPrompt(skills);
   const tools = toOpenAITools();
@@ -115,6 +160,7 @@ export async function runOpenAICompatibleLoop(opts: OpenAILoopOptions): Promise<
         retry.content = collapseAskDuplicateText(opts, retry.content, retry.toolCalls);
         if (retry.toolCalls.length === 0) return;
         messages.push(assistantMessage(retry.content, retry.toolCalls));
+        emitPhase(opts, 'running_tools');
         await executeToolCalls(retry.toolCalls, messages, toolCtx);
         usedTools = true;
         continue;
@@ -124,6 +170,7 @@ export async function runOpenAICompatibleLoop(opts: OpenAILoopOptions): Promise<
 
     messages.push(assistantMessage(content, toolCalls));
     const hadAsk = toolCalls.some((t) => t.name === 'AskUserQuestion');
+    emitPhase(opts, 'running_tools');
     await executeToolCalls(toolCalls, messages, toolCtx);
     usedTools = true;
 
@@ -183,6 +230,7 @@ async function requestStreaming(
   messages: ChatMessage[],
   tools: ReturnType<typeof toOpenAITools>
 ): Promise<{ content: string; toolCalls: StreamToolCall[] }> {
+  emitPhase(opts, 'calling_model');
   const url = joinUrl(opts.baseUrl, '/chat/completions');
   const resp = await fetch(url, {
     method: 'POST',
@@ -213,6 +261,7 @@ async function requestNonStreaming(
   messages: ChatMessage[],
   tools: ReturnType<typeof toOpenAITools>
 ): Promise<{ content: string; toolCalls: StreamToolCall[] }> {
+  emitPhase(opts, 'calling_model');
   const url = joinUrl(opts.baseUrl, '/chat/completions');
   const resp = await fetch(url, {
     method: 'POST',
@@ -253,11 +302,7 @@ async function requestNonStreaming(
   const filtered = toolCalls.filter((t) => t.name);
   // AskUserQuestion 的正文由 collapseAskDuplicateText 统一替换，避免先打出长文再收回
   if (content && !filtered.some((t) => t.name === 'AskUserQuestion')) {
-    opts.emit({
-      type: 'text_delta',
-      sessionId: opts.sessionId,
-      data: { delta: content }
-    });
+    await emitContentAsDeltas(opts, content);
   }
 
   return { content, toolCalls: filtered };
@@ -308,14 +353,16 @@ async function consumeOpenAIStream(
         }
         if (Array.isArray(finalMsg.tool_calls)) {
           finalMsg.tool_calls.forEach((tc: any, idx: number) => {
-            toolMap.set(idx, {
+            const acc: StreamToolCall = {
               id: tc.id || `call_${randomUUID()}_${idx}`,
               name: tc.function?.name || '',
               arguments:
                 typeof tc.function?.arguments === 'string'
                   ? tc.function.arguments
                   : JSON.stringify(tc.function?.arguments || {})
-            });
+            };
+            toolMap.set(idx, acc);
+            if (acc.name) emitToolPreview(emit, sessionId, acc);
           });
         }
       }
@@ -341,8 +388,15 @@ async function consumeOpenAIStream(
             toolMap.set(idx, acc);
           }
           if (tc.id) acc.id = tc.id;
-          if (tc.function?.name) acc.name = tc.function.name;
-          if (tc.function?.arguments) acc.arguments += tc.function.arguments;
+          if (tc.function?.name) {
+            const nameChanged = acc.name !== tc.function.name;
+            acc.name = tc.function.name;
+            if (nameChanged) emitToolPreview(emit, sessionId, acc);
+          }
+          if (tc.function?.arguments) {
+            acc.arguments += tc.function.arguments;
+            if (acc.name) emitToolPreview(emit, sessionId, acc);
+          }
         }
       }
     }

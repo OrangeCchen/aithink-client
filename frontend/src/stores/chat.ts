@@ -1,5 +1,67 @@
 import { defineStore } from 'pinia';
-import type { Message, ToolCall, ExternalTask, ExternalAppId } from '@shared/types';
+import type {
+  Message,
+  ToolCall,
+  ExternalTask,
+  ExternalAppId,
+  DispatchTarget
+} from '@shared/types';
+
+const EXTERNAL_APP_NAMES: Record<ExternalAppId, string> = {
+  doubao: '豆包',
+  qwenworkcn: '千问Work',
+  workbuddy: 'WorkBuddy'
+};
+
+const DISPATCH_TARGET_STORAGE_KEY = 'aithink-dispatch-target';
+const DISPATCH_MODE_STORAGE_KEY = 'aithink-dispatch-mode';
+const DISPATCH_APPS_STORAGE_KEY = 'aithink-dispatch-apps';
+
+const VALID_EXTERNAL_APP_IDS: ExternalAppId[] = ['doubao', 'qwenworkcn', 'workbuddy'];
+
+function isExternalAppId(value: unknown): value is ExternalAppId {
+  return typeof value === 'string' && VALID_EXTERNAL_APP_IDS.includes(value as ExternalAppId);
+}
+
+function loadDispatchTarget(): DispatchTarget {
+  if (typeof localStorage === 'undefined') return 'local';
+  const saved = localStorage.getItem(DISPATCH_TARGET_STORAGE_KEY);
+  if (saved === 'qoderwork') return 'doubao';
+  if (
+    saved === 'local' ||
+    saved === 'doubao' ||
+    saved === 'qwenworkcn' ||
+    saved === 'workbuddy'
+  ) {
+    return saved;
+  }
+  return 'local';
+}
+
+function loadDispatchMode(): 'local' | 'external' {
+  if (typeof localStorage === 'undefined') return 'local';
+  const saved = localStorage.getItem(DISPATCH_MODE_STORAGE_KEY);
+  if (saved === 'external') return 'external';
+  return loadDispatchTarget() === 'local' ? 'local' : 'external';
+}
+
+function loadExternalAppTargets(): ExternalAppId[] {
+  if (typeof localStorage === 'undefined') return ['doubao'];
+  try {
+    const raw = localStorage.getItem(DISPATCH_APPS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const apps = parsed.filter(isExternalAppId);
+        if (apps.length > 0) return apps;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  const legacy = loadDispatchTarget();
+  return legacy === 'local' ? ['doubao'] : [legacy as ExternalAppId];
+}
 import { useSessionsStore } from './sessions';
 import { useSpaceStore } from './space';
 import { useQuestionStore } from './question';
@@ -18,6 +80,8 @@ export const useChatStore = defineStore('chat', {
     // 并发派发流式阶段的任务列表（卡片网格需要）
     streamDispatchTasks: null as ExternalTask[] | null,
     currentToolCalls: [] as ToolCall[],
+    /** 流式阶段：syncing_skills | calling_model | null */
+    streamPhase: null as string | null,
     // 待回填到输入框的文本（如从技能市场"立即使用"跳转过来）
     pendingInput: '' as string,
     // 外部任务列表(mock 阶段存前端,后续迁到后端)
@@ -33,7 +97,15 @@ export const useChatStore = defineStore('chat', {
     // 由前端负责落库的会话（mock 派发会话）。真实会话由后端写，前端不能覆盖
     frontendOwnedSessionIds: [] as string[],
     // 待滚动定位的消息 ID（点击子任务来源引用时设置）
-    pendingScrollMessageId: null as string | null
+    pendingScrollMessageId: null as string | null,
+    /** 输入栏派发目标（兼容旧单选） */
+    dispatchTarget: loadDispatchTarget() as DispatchTarget,
+    /** 本机对话 / 外部 App 并发 */
+    dispatchMode: loadDispatchMode() as 'local' | 'external',
+    /** 外部 App 多选（2～3 个时可汇总） */
+    externalAppTargets: loadExternalAppTargets() as ExternalAppId[],
+    /** 已完成 AI 汇总的 batchId，避免重复插入 */
+    summarizedBatchIds: [] as string[]
   }),
 
   getters: {
@@ -103,69 +175,7 @@ export const useChatStore = defineStore('chat', {
       };
       this.messages.push(userMessage);
 
-      // ========== Mock: 检测关键词触发外部任务派发 ==========
-      const lowerPrompt = prompt.toLowerCase();
-
-      // 确保有 sessionId(派发任务需要关联到会话)
-      const needsMockSession =
-        !this.currentSessionId &&
-        (lowerPrompt.includes('全面') ||
-          lowerPrompt.includes('完整实现') ||
-          lowerPrompt.includes('重构') ||
-          (lowerPrompt.includes('测试') && lowerPrompt.includes('单元')) ||
-          lowerPrompt.includes('文档') ||
-          lowerPrompt.includes('说明'));
-
-      if (needsMockSession) {
-        const session = {
-          id: crypto.randomUUID(),
-          title: prompt.slice(0, 30),
-          model,
-          workspacePath: workspacePath || '',
-          spaceId,
-          createdAt: Date.now()
-        };
-        this.currentSessionId = session.id;
-        userMessage.sessionId = session.id;
-        this.frontendOwnedSessionIds.push(session.id);
-        useSessionsStore().addSession(session);
-        // 落库，刷新/HMR 后会话与子任务都还在
-        await window.electronAPI
-          .invoke('agent:save-session', { session, messages: [] })
-          .catch((err: any) => console.error('save session failed:', err));
-      }
-
-      // 快照当前消息(含用户消息)
       this.snapshotCurrentMessages();
-
-      // 并发派发: 包含"全面"、"完整"等关键词
-      if (lowerPrompt.includes('全面') || lowerPrompt.includes('完整实现')) {
-        this.dispatchMultipleTasks([
-          { appId: 'qoderwork', prompt: '重构登录模块' },
-          { appId: 'qwenworkcn', prompt: '编写单元测试' },
-          { appId: 'workbuddy', prompt: '生成技术文档' }
-        ], userMessage.id);
-        return; // 不走正常对话流程
-      }
-
-      // 单任务派发: 包含"重构"
-      if (lowerPrompt.includes('重构')) {
-        this.dispatchExternalTask('qoderwork', prompt, userMessage.id);
-        return;
-      }
-
-      // 单任务派发: 包含"测试"
-      if (lowerPrompt.includes('测试') && lowerPrompt.includes('单元')) {
-        this.dispatchExternalTask('qwenworkcn', prompt, userMessage.id);
-        return;
-      }
-
-      // 单任务派发: 包含"文档"
-      if (lowerPrompt.includes('文档') || lowerPrompt.includes('说明')) {
-        this.dispatchExternalTask('workbuddy', prompt, userMessage.id);
-        return;
-      }
-      // ========== Mock 派发逻辑结束 ==========
 
       this.streaming = true;
       this.streamBuffer = '';
@@ -173,6 +183,7 @@ export const useChatStore = defineStore('chat', {
       this.streamBlockTitle = '';
       this.streamDispatchTasks = null;
       this.currentToolCalls = [];
+      this.streamPhase = null;
       this.streamingSessionId = this.currentSessionId;
 
       // 走真实对话后，后端接管落库，前端不再整体覆盖这个会话
@@ -208,7 +219,12 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
+    setStreamPhase(phase: string | null) {
+      this.streamPhase = phase;
+    },
+
     appendTextDelta(delta: string) {
+      this.streamPhase = null;
       this.streamBuffer += delta;
     },
 
@@ -250,6 +266,7 @@ export const useChatStore = defineStore('chat', {
       this.streamBlockTitle = '';
       this.streamDispatchTasks = null;
       this.currentToolCalls = [];
+      this.streamPhase = null;
       this.streaming = false;
       this.streamingSessionId = null;
 
@@ -399,15 +416,104 @@ export const useChatStore = defineStore('chat', {
       this.pendingScrollMessageId = messageId; // ChatView 监听后滚动+高亮
     },
 
-    // ========== 外部任务派发 (Mock) ==========
+    setDispatchTarget(target: DispatchTarget) {
+      this.dispatchTarget = target;
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(DISPATCH_TARGET_STORAGE_KEY, target);
+      }
+    },
+
+    setDispatchMode(mode: 'local' | 'external') {
+      this.dispatchMode = mode;
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(DISPATCH_MODE_STORAGE_KEY, mode);
+      }
+    },
+
+    setExternalAppTargets(apps: ExternalAppId[]) {
+      this.externalAppTargets = apps;
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(DISPATCH_APPS_STORAGE_KEY, JSON.stringify(apps));
+      }
+      if (apps.length === 1) {
+        this.setDispatchTarget(apps[0]);
+      }
+    },
+
+    dispatchBlockTitleForTask(task: ExternalTask): string {
+      if (task.status === 'completed') return `${task.appName} 已完成`;
+      if (task.status === 'cancelled') return `${task.appName} 已取消`;
+      if (task.status === 'failed') return `${task.appName} 任务失败`;
+      return '任务派发';
+    },
+
+    async ensureDispatchSession(
+      prompt: string,
+      model: string,
+      spaceId?: string,
+      workspacePath?: string
+    ) {
+      if (this.currentSessionId) return;
+      const session = {
+        id: crypto.randomUUID(),
+        title: prompt.slice(0, 30),
+        model,
+        workspacePath: workspacePath || '',
+        spaceId,
+        createdAt: Date.now()
+      };
+      this.currentSessionId = session.id;
+      this.frontendOwnedSessionIds.push(session.id);
+      useSessionsStore().addSession(session);
+      await window.electronAPI
+        .invoke('agent:save-session', { session, messages: [] })
+        .catch((err: any) => console.error('save session failed:', err));
+    },
+
+    /** 派发按钮：将当前输入派发到选中的一个或多个外部 App */
+    async dispatchToExternalApp(prompt: string, model: string) {
+      const apps =
+        this.externalAppTargets.length > 0
+          ? [...this.externalAppTargets]
+          : this.dispatchTarget !== 'local'
+            ? [this.dispatchTarget as ExternalAppId]
+            : [];
+      if (apps.length === 0) return;
+
+      this.ensureExternalTaskListener();
+      const spaceStore = useSpaceStore();
+      const spaceId = this.spaceId || spaceStore.activeSpaceId || undefined;
+      const workspacePath =
+        this.workspacePath || spaceStore.activeFolderPath || undefined;
+
+      await this.ensureDispatchSession(prompt, model, spaceId, workspacePath);
+      const sessionId = this.currentSessionId!;
+
+      const userMessage: Message = {
+        id: Date.now().toString(),
+        sessionId,
+        role: 'user',
+        content: prompt,
+        timestamp: Date.now()
+      };
+      this.pushMessageTo(sessionId, userMessage);
+      this.snapshotCurrentMessages();
+
+      if (apps.length === 1) {
+        this.dispatchExternalTask(apps[0], prompt, userMessage.id);
+      } else {
+        this.dispatchMultipleTasks(
+          apps.map((appId) => ({ appId, prompt })),
+          userMessage.id
+        );
+      }
+    },
+
+    // ========== 外部任务派发 ==========
 
     /** 派发单个外部任务 */
     dispatchExternalTask(appId: ExternalAppId, prompt: string, triggerMessageId?: string) {
-      const appNames: Record<ExternalAppId, string> = {
-        qoderwork: 'QoderWork',
-        qwenworkcn: '千问Work',
-        workbuddy: 'WorkBuddy'
-      };
+      const appNames = EXTERNAL_APP_NAMES;
 
       const task: ExternalTask = {
         id: `ext-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
@@ -436,7 +542,8 @@ export const useChatStore = defineStore('chat', {
       this.streamBlockTitle = '任务派发';
       this.streamingSessionId = ownerSessionId;
 
-      const fullMessage = `已派发给 **${appNames[appId]}**\n\n⏳ 正在执行中，请稍候...`;
+      const fullMessage = `已派发给 **${appNames[appId]}**，可在下方查看进度。`;
+      this.streamDispatchTasks = [task];
 
       let charIndex = 0;
       const streamInterval = setInterval(() => {
@@ -446,14 +553,14 @@ export const useChatStore = defineStore('chat', {
         } else {
           clearInterval(streamInterval);
 
-          // streaming 结束,插入完整消息(写回派发时的会话)
           this.pushMessageTo(ownerSessionId, {
-            id: Date.now().toString(),
+            id: `dispatch-${task.id}`,
             sessionId: ownerSessionId,
             role: 'assistant',
             content: fullMessage,
             kind: 'dispatch',
             blockTitle: '任务派发',
+            dispatchTasks: [task],
             timestamp: Date.now()
           });
 
@@ -461,14 +568,231 @@ export const useChatStore = defineStore('chat', {
           this.streamBuffer = '';
           this.streamKind = null;
           this.streamBlockTitle = '';
+          this.streamDispatchTasks = null;
           this.streamingSessionId = null;
         }
-      }, 20); // 每20ms输出一个字符
+      }, 20);
 
-      // Mock 执行过程
-      this.mockExecuteTask(task.id);
+      this.enqueueRealExternalTask(task.id);
 
       return task;
+    },
+
+    /** 订阅后端外部任务进度（只注册一次） */
+    ensureExternalTaskListener() {
+      if ((this as any)._externalTaskListening) return;
+      (this as any)._externalTaskListening = true;
+      window.electronAPI.on('external-task:updated', (updated: ExternalTask) => {
+        this.applyExternalTaskUpdate(updated);
+      });
+    },
+
+    /** 合并后端推送的任务状态 */
+    applyExternalTaskUpdate(updated: ExternalTask) {
+      const idx = this.externalTasks.findIndex((t) => t.id === updated.id);
+      if (idx >= 0) {
+        this.externalTasks[idx] = updated;
+      } else {
+        this.externalTasks.push(updated);
+      }
+
+      const terminal =
+        updated.status === 'completed' ||
+        updated.status === 'failed' ||
+        updated.status === 'cancelled';
+
+      if (terminal) {
+        const pendingIdx = this.pendingExternalTaskIds.indexOf(updated.id);
+        if (pendingIdx >= 0) {
+          this.pendingExternalTaskIds.splice(pendingIdx, 1);
+        }
+        this.maybeInsertExternalTaskSummary(updated.sessionId);
+      } else if (
+        (updated.status === 'queued' || updated.status === 'running') &&
+        !this.pendingExternalTaskIds.includes(updated.id)
+      ) {
+        this.pendingExternalTaskIds.push(updated.id);
+      }
+
+      // 刷新并发派发卡片
+      const ownerSessionId = updated.sessionId;
+      const list =
+        this.currentSessionId === ownerSessionId
+          ? this.messages
+          : this.sessionMessages[ownerSessionId];
+      const dispatchMsg = list?.find(
+        (m) => m.kind === 'dispatch' && m.dispatchTasks?.some((t) => t.id === updated.id)
+      );
+      if (dispatchMsg?.id) {
+        if (terminal) {
+          const batchTasks = (dispatchMsg.dispatchTasks || []).map(
+            (t) => this.externalTasks.find((et) => et.id === t.id) || t
+          );
+          if (batchTasks.length > 1) {
+            const pending = batchTasks.some(
+              (t) => t.status === 'queued' || t.status === 'running'
+            );
+            dispatchMsg.blockTitle = pending
+              ? `并发派发 ${batchTasks.length} 个 App`
+              : `${batchTasks.length} 个 App 执行完毕`;
+          } else {
+            dispatchMsg.blockTitle = this.dispatchBlockTitleForTask(updated);
+          }
+        }
+        if (dispatchMsg.dispatchTasks?.length) {
+          dispatchMsg.dispatchTasks = dispatchMsg.dispatchTasks.map((t) =>
+            t.id === updated.id ? { ...updated } : t
+          );
+        }
+        this.appendToMessageIn(ownerSessionId, dispatchMsg.id, '');
+      }
+    },
+
+    /** 该批次外部任务全部结束后，用本机模型汇总各 App 结果 */
+    maybeInsertExternalTaskSummary(ownerSessionId: string) {
+      if (!ownerSessionId) return;
+
+      const batchIds = [
+        ...new Set(
+          this.externalTasks
+            .filter((t) => t.sessionId === ownerSessionId && t.batchId)
+            .map((t) => t.batchId as string)
+        )
+      ];
+
+      for (const batchId of batchIds) {
+        if (this.summarizedBatchIds.includes(batchId)) continue;
+
+        const batchTasks = this.externalTasks.filter(
+          (t) => t.sessionId === ownerSessionId && t.batchId === batchId
+        );
+        if (batchTasks.length < 2) continue;
+        if (
+          batchTasks.some((t) => t.status === 'queued' || t.status === 'running')
+        ) {
+          continue;
+        }
+
+        this.summarizedBatchIds.push(batchId);
+        void this.summarizeExternalBatch(ownerSessionId, batchTasks);
+      }
+    },
+
+    buildFallbackSummary(tasks: ExternalTask[]): string {
+      let summary = '';
+      tasks.forEach((t) => {
+        const body =
+          t.status === 'completed'
+            ? t.result || '(无结果文本)'
+            : `❌ ${t.error || t.status}`;
+        summary += `**${t.appName}**\n${body}\n\n`;
+      });
+      return summary.trimEnd();
+    },
+
+    replaceMessageContent(sessionId: string, messageId: string, content: string) {
+      const list =
+        this.currentSessionId === sessionId
+          ? this.messages
+          : this.sessionMessages[sessionId];
+      const msg = list?.find((m) => m.id === messageId);
+      if (!msg) return;
+      msg.content = content;
+      if (this.currentSessionId === sessionId) {
+        this.sessionMessages[sessionId] = [...this.messages];
+      }
+      this.persistMessages(sessionId, this.sessionMessages[sessionId] || []);
+    },
+
+    async summarizeExternalBatch(sessionId: string, tasks: ExternalTask[]) {
+      const question = tasks[0]?.prompt?.trim() || '';
+      const batchId = tasks[0]?.batchId || `batch-${Date.now()}`;
+      const summaryMessageId = `summary-${batchId}`;
+
+      const existing =
+        this.sessionMessages[sessionId] ||
+        (this.currentSessionId === sessionId ? this.messages : []);
+      if (existing.some((m) => m.id === summaryMessageId)) return;
+
+      this.pushMessageTo(sessionId, {
+        id: summaryMessageId,
+        sessionId,
+        role: 'assistant',
+        content: '⏳ 正在综合各 App 回复，生成本机汇总答案…',
+        kind: 'task-result',
+        blockTitle: '汇总回答',
+        timestamp: Date.now()
+      });
+
+      try {
+        const res: { success?: boolean; summary?: string; error?: string } =
+          await window.electronAPI.invoke('external-task:summarize-batch', {
+            question,
+            tasks: tasks.map((t) => ({
+              appId: t.appId,
+              appName: t.appName,
+              status: t.status,
+              result: t.result,
+              error: t.error
+            }))
+          });
+
+        const content =
+          res?.success && res.summary?.trim()
+            ? res.summary.trim()
+            : `${this.buildFallbackSummary(tasks)}\n\n_(本机模型汇总失败：${res?.error || '未知错误'}，以上为各 App 原始结果。)_`;
+
+        this.replaceMessageContent(sessionId, summaryMessageId, content);
+      } catch (err: any) {
+        const content = `${this.buildFallbackSummary(tasks)}\n\n_(本机模型汇总失败：${err?.message || String(err)}，以上为各 App 原始结果。)_`;
+        this.replaceMessageContent(sessionId, summaryMessageId, content);
+      }
+    },
+
+    /** 调用后端真实执行 */
+    enqueueRealExternalTask(taskId: string) {
+      this.ensureExternalTaskListener();
+      window.electronAPI
+        .invoke('external-task:enqueue', { taskId })
+        .then((res: { success?: boolean; error?: string }) => {
+          if (res && res.success === false) {
+            const task = this.externalTasks.find((t) => t.id === taskId);
+            if (task) {
+              task.status = 'failed';
+              task.error = res.error || '入队失败';
+              task.completedAt = Date.now();
+              if (!task.logs) task.logs = [];
+              task.logs.push({ time: Date.now(), message: `❌ ${task.error}` });
+              this.persistExternalTask(task);
+              this.applyExternalTaskUpdate(task);
+            }
+          }
+        })
+        .catch((err: any) => {
+          console.error('enqueue external task failed:', err);
+          const task = this.externalTasks.find((t) => t.id === taskId);
+          if (task) {
+            task.status = 'failed';
+            task.error = err?.message || String(err);
+            task.completedAt = Date.now();
+            this.persistExternalTask(task);
+            this.applyExternalTaskUpdate(task);
+          }
+        });
+    },
+
+    cancelExternalTask(taskId: string) {
+      this.ensureExternalTaskListener();
+      return window.electronAPI.invoke('external-task:cancel', { taskId });
+    },
+
+    retryExternalTask(taskId: string) {
+      this.ensureExternalTaskListener();
+      const task = this.externalTasks.find((t) => t.id === taskId);
+      if (task && !this.pendingExternalTaskIds.includes(taskId)) {
+        this.pendingExternalTaskIds.push(taskId);
+      }
+      return window.electronAPI.invoke('external-task:retry', { taskId });
     },
 
     /** 落库单个外部任务 */
@@ -495,6 +819,7 @@ export const useChatStore = defineStore('chat', {
           }
         }
         this.externalTasks = tasks;
+        this.ensureExternalTaskListener();
         // 有子任务的会话即 mock 派发会话，重建前端落库归属
         for (const t of tasks) {
           if (t.sessionId && !this.frontendOwnedSessionIds.includes(t.sessionId)) {
@@ -507,12 +832,12 @@ export const useChatStore = defineStore('chat', {
     },
 
     /** 派发多个外部任务(并发) */
-    dispatchMultipleTasks(tasks: Array<{ appId: ExternalAppId; prompt: string }>, triggerMessageId?: string) {
-      const appNames: Record<ExternalAppId, string> = {
-        qoderwork: 'QoderWork',
-        qwenworkcn: '千问Work',
-        workbuddy: 'WorkBuddy'
-      };
+    dispatchMultipleTasks(
+      tasks: Array<{ appId: ExternalAppId; prompt: string }>,
+      triggerMessageId?: string
+    ) {
+      const appNames = EXTERNAL_APP_NAMES;
+      const batchId = `batch-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
       const createdTasks: ExternalTask[] = [];
       const ownerSessionId = this.currentSessionId || '';
@@ -525,6 +850,7 @@ export const useChatStore = defineStore('chat', {
           appName: appNames[t.appId],
           prompt: t.prompt,
           triggerMessageId,
+          batchId,
           status: 'queued',
           progress: 0,
           createdAt: Date.now(),
@@ -537,7 +863,8 @@ export const useChatStore = defineStore('chat', {
         this.persistExternalTask(task);
       });
 
-      const messageContent = `检测到 ${tasks.length} 个可并行执行的子任务，完成后自动汇总结果。`;
+      const appLabel = createdTasks.map((t) => t.appName).join('、');
+      const messageContent = `已并发派发给 **${appLabel}**（${tasks.length} 个 App），完成后将自动汇总为本机答案。`;
 
       // 模拟 streaming 效果
       this.streaming = true;
@@ -574,11 +901,10 @@ export const useChatStore = defineStore('chat', {
           this.streamBlockTitle = '';
           this.streamingSessionId = null;
 
-          // Mock 并发执行
           createdTasks.forEach((task, index) => {
             setTimeout(() => {
-              this.mockExecuteTask(task.id, dispatchMessage.id);
-            }, index * 500); // 错开启动
+              this.enqueueRealExternalTask(task.id);
+            }, index * 500);
           });
         }
       }, 15); // 每15ms输出一个字符
@@ -638,6 +964,7 @@ export const useChatStore = defineStore('chat', {
         task.status = 'running';
         task.startedAt = Date.now();
         addLog(`${task.appName} 已启动，开始执行任务...`);
+        this.applyExternalTaskUpdate({ ...task });
       }, 1000);
 
       // 模拟进度更新
@@ -654,56 +981,10 @@ export const useChatStore = defineStore('chat', {
         task.status = 'completed';
         task.completedAt = Date.now();
         task.progress = 100;
-        task.result = `任务完成！\n\n执行结果示例:\n- 已重构 ${task.prompt}\n- 生成了相关文档\n- 所有测试通过`;
+        task.result = `任务完成！\n\n执行结果示例:\n- 已处理 ${task.prompt}\n- 生成了相关文档\n- 所有测试通过`;
         addLog(`✅ 任务完成`);
         this.persistExternalTask(task);
-
-        // 从待处理列表移除
-        const index = this.pendingExternalTaskIds.indexOf(taskId);
-        if (index > -1) {
-          this.pendingExternalTaskIds.splice(index, 1);
-        }
-
-        // 该会话的任务全部结束后,插入汇总消息(按 ownerSessionId 判断，不看当前视图)
-        const sessionPending = this.externalTasks.filter(
-          (t) =>
-            t.sessionId === ownerSessionId &&
-            (t.status === 'queued' || t.status === 'running')
-        );
-        if (sessionPending.length === 0) {
-          const completedTasks = this.externalTasks.filter(
-            (t) => t.sessionId === ownerSessionId && t.status === 'completed'
-          );
-
-          if (completedTasks.length > 1) {
-            // 并发任务的汇总
-            let summary = '';
-            completedTasks.forEach((t, i) => {
-              summary += `**任务 ${i + 1}: ${t.prompt}** (${t.appName})\n${t.result}\n\n`;
-            });
-
-            this.pushMessageTo(ownerSessionId, {
-              id: Date.now().toString(),
-              sessionId: ownerSessionId,
-              role: 'assistant',
-              content: summary.trimEnd(),
-              kind: 'task-result',
-              blockTitle: `所有子任务已完成（${completedTasks.length} 个）`,
-              timestamp: Date.now()
-            });
-          } else if (completedTasks.length === 1) {
-            // 单任务完成
-            this.pushMessageTo(ownerSessionId, {
-              id: Date.now().toString(),
-              sessionId: ownerSessionId,
-              role: 'assistant',
-              content: task.result || '',
-              kind: 'task-result',
-              blockTitle: `${task.appName} 已完成任务`,
-              timestamp: Date.now()
-            });
-          }
-        }
+        this.applyExternalTaskUpdate({ ...task });
       }, 1000 + duration);
     }
   }

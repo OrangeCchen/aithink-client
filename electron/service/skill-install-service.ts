@@ -24,6 +24,22 @@ function getManifestPath(): string {
   return join(getSkillsRoot(), 'manifest.json');
 }
 
+
+const workspaceSyncCache = new Map<string, { manifestMtime: number; names: string[] }>();
+
+export function invalidateSkillSyncCache(): void {
+  workspaceSyncCache.clear();
+}
+
+async function getManifestMtime(): Promise<number> {
+  try {
+    const stat = await fs.stat(getManifestPath());
+    return stat.mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
 function getSkillDir(slug: string): string {
   return join(getSkillsRoot(), slug);
 }
@@ -66,6 +82,7 @@ async function upsertManifest(entry: InstalledSkill): Promise<InstalledSkill> {
   const list = (await listInstalled()).filter((s) => s.slug !== entry.slug);
   list.push(entry);
   await writeManifest(list);
+  invalidateSkillSyncCache();
   return entry;
 }
 
@@ -155,6 +172,7 @@ export async function removeSkill(slug: string): Promise<void> {
   await fs.rm(getSkillDir(slug), { recursive: true, force: true });
   const list = (await listInstalled()).filter((s) => s.slug !== slug);
   await writeManifest(list);
+  invalidateSkillSyncCache();
 }
 
 // 把已安装技能同步到会话 workspace 的 .claude/skills/，返回启用的技能 name 列表
@@ -162,6 +180,12 @@ export async function removeSkill(slug: string): Promise<void> {
 export async function syncInstalledToWorkspace(workspacePath: string): Promise<string[]> {
   const installed = await listInstalled();
   if (installed.length === 0) return [];
+
+  const manifestMtime = await getManifestMtime();
+  const cached = workspaceSyncCache.get(workspacePath);
+  if (cached && cached.manifestMtime === manifestMtime) {
+    return cached.names;
+  }
 
   const targetRoot = join(workspacePath, '.claude', 'skills');
   await ensureDir(targetRoot);
@@ -184,5 +208,6 @@ export async function syncInstalledToWorkspace(workspacePath: string): Promise<s
     }
   }
 
+  workspaceSyncCache.set(workspacePath, { manifestMtime, names: enabledNames });
   return enabledNames;
 }

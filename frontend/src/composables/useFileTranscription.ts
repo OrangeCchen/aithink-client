@@ -33,17 +33,39 @@ const modelPath = ref('');
 const modelReady = ref(false);
 const activeId = ref<string | null>(null);
 const activeTask = ref<ActiveTranscriptionTask | null>(null);
-/** 正在生成纪要的记录（可与媒体转写并行，不占用 busy） */
-const minutesActiveId = ref<string | null>(null);
+/** 正在跑云端纪要/润色的记录 id（可多条并行；不占本地 Whisper 队列） */
+const minutesActiveIds = ref<string[]>([]);
 const progress = ref(0);
 const progressMessage = ref('');
 const error = ref('');
 const hydrated = ref(false);
 const attention = ref<TranscriptionAttention>(loadAttention());
 
-/** 仅媒体 Whisper 占用；纪要生成不排队、不挡听写 */
+function isMinutesActive(id?: string | null) {
+  return Boolean(id && minutesActiveIds.value.includes(id));
+}
+
+function trackMinutes(id: string) {
+  if (!minutesActiveIds.value.includes(id)) {
+    minutesActiveIds.value = [...minutesActiveIds.value, id];
+  }
+}
+
+function untrackMinutes(id: string) {
+  if (!minutesActiveIds.value.includes(id)) return;
+  minutesActiveIds.value = minutesActiveIds.value.filter((item) => item !== id);
+}
+
+/** 仅媒体 Whisper 占用；纪要走云端，不排队、不挡听写 */
 const busy = computed(() => Boolean(activeId.value));
-const minutesBusy = computed(() => Boolean(minutesActiveId.value));
+/** 当前打开记录的纪要是否进行中（详情操作禁用用；不是全局锁） */
+const minutesBusy = computed(() => isMinutesActive(current.value?.id));
+/** 兼容旧用法：优先当前记录，否则取最近一条进行中的纪要任务 */
+const minutesActiveId = computed(() => {
+  const currentId = current.value?.id;
+  if (currentId && minutesActiveIds.value.includes(currentId)) return currentId;
+  return minutesActiveIds.value[minutesActiveIds.value.length - 1] || null;
+});
 const queuedRecords = computed(() =>
   records.value
     .filter((record) => record.stage === 'queued')
@@ -229,9 +251,7 @@ function bindListeners() {
         if (activeId.value === event.id || activeId.value === 'pending') {
           activeId.value = null;
         }
-        if (minutesActiveId.value === event.id) {
-          minutesActiveId.value = null;
-        }
+        untrackMinutes(event.id);
         if (activeTask.value?.id === event.id || activeTask.value?.id == null) {
           activeTask.value = null;
         }
@@ -245,8 +265,8 @@ function bindListeners() {
         if (releasedMedia) {
           activeId.value = null;
         }
-        minutesActiveId.value = event.id;
-        // 无媒体任务时始终展示纪要进度；有媒体时不抢侧栏
+        trackMinutes(event.id);
+        // 无媒体任务时展示纪要进度；有媒体转写时不抢侧栏
         if (!activeId.value || activeTask.value?.id === event.id) {
           activeTask.value = {
             id: event.id,
@@ -468,11 +488,12 @@ async function saveMinutes(minutes: string) {
 
 async function generateMinutes(transcript: string) {
   if (!current.value) return;
-  if (minutesActiveId.value === current.value.id) return;
+  // 仅阻止同一条重复提交；其它记录的纪要/本地转写都不挡
+  if (isMinutesActive(current.value.id)) return;
   error.value = '';
   const recordId = current.value.id;
   const fileName = current.value.fileName;
-  minutesActiveId.value = recordId;
+  trackMinutes(recordId);
   // 有媒体转写进行中时不抢侧栏进度条；否则展示纪要进度
   if (!activeId.value) {
     activeTask.value = {
@@ -511,7 +532,7 @@ async function generateMinutes(transcript: string) {
   } catch (reason: any) {
     error.value = reason?.message || '生成纪要失败';
   } finally {
-    if (minutesActiveId.value === recordId) minutesActiveId.value = null;
+    untrackMinutes(recordId);
     if (activeTask.value?.id === recordId && activeTask.value.stage === 'summarizing') {
       activeTask.value = null;
     }
@@ -520,13 +541,14 @@ async function generateMinutes(transcript: string) {
 
 async function rewriteSelection(selectedText: string, opinion: string, fullMinutes: string) {
   if (!current.value) return '';
-  if (minutesActiveId.value === current.value.id || activeId.value === current.value.id) {
+  // 本条纪要操作中，或本条仍在本地转写时，暂不润色
+  if (isMinutesActive(current.value.id) || activeId.value === current.value.id) {
     return '';
   }
   error.value = '';
   const recordId = current.value.id;
   const fileName = current.value.fileName;
-  minutesActiveId.value = recordId;
+  trackMinutes(recordId);
   if (!activeId.value) {
     activeTask.value = {
       id: recordId,
@@ -548,7 +570,7 @@ async function rewriteSelection(selectedText: string, opinion: string, fullMinut
     error.value = reason?.message || '局部重写失败';
     return '';
   } finally {
-    if (minutesActiveId.value === recordId) minutesActiveId.value = null;
+    untrackMinutes(recordId);
     if (activeTask.value?.id === recordId && activeTask.value.stage === 'summarizing') {
       activeTask.value = null;
     }
@@ -558,7 +580,7 @@ async function rewriteSelection(selectedText: string, opinion: string, fullMinut
 /** 按意见全局修订整篇纪要 */
 async function reviseMinutes(opinion: string, fullMinutes?: string) {
   if (!current.value) return null;
-  if (minutesActiveId.value === current.value.id || activeId.value === current.value.id) {
+  if (isMinutesActive(current.value.id) || activeId.value === current.value.id) {
     return null;
   }
   const trimmed = opinion.trim();
@@ -569,7 +591,7 @@ async function reviseMinutes(opinion: string, fullMinutes?: string) {
   error.value = '';
   const recordId = current.value.id;
   const fileName = current.value.fileName;
-  minutesActiveId.value = recordId;
+  trackMinutes(recordId);
   if (!activeId.value) {
     activeTask.value = {
       id: recordId,
@@ -591,7 +613,7 @@ async function reviseMinutes(opinion: string, fullMinutes?: string) {
     error.value = reason?.message || '全局修改失败';
     return null;
   } finally {
-    if (minutesActiveId.value === recordId) minutesActiveId.value = null;
+    untrackMinutes(recordId);
     if (activeTask.value?.id === recordId && activeTask.value.stage === 'summarizing') {
       activeTask.value = null;
     }

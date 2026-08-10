@@ -22,4 +22,6 @@ __pycache__
 .mypy_cache
 
 # TS build info
-*.tsbuildinfo
+.tmp-qw-asar
+native/mac-computer-use/mac-computer-use
+

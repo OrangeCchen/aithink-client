@@ -17,14 +17,14 @@
         </div>
         <div class="task-actions">
           <button
-            v-if="task.status === 'running'"
+            v-if="task.status === 'running' || task.status === 'queued'"
             class="action-btn cancel"
             @click="cancelTask"
           >
             取消
           </button>
           <button
-            v-if="task.status === 'failed'"
+            v-if="task.status === 'failed' || task.status === 'cancelled'"
             class="action-btn retry"
             @click="retryTask"
           >
@@ -72,8 +72,8 @@
     </div>
 
     <!-- 错误信息 -->
-    <div v-if="task.status === 'failed' && task.error" class="task-error">
-      <div class="error-title">❌ 错误信息</div>
+    <div v-if="(task.status === 'failed' || task.status === 'cancelled') && task.error" class="task-error">
+      <div class="error-title">{{ task.status === 'cancelled' ? '⚠️ 已取消' : '❌ 错误信息' }}</div>
       <div class="error-content">{{ task.error }}</div>
     </div>
   </div>
@@ -110,13 +110,14 @@ const triggerMessageText = computed(() => {
 });
 
 const statusText = computed(() => {
-  const map = {
+  const map: Record<string, string> = {
     queued: '排队中',
     running: '执行中',
     completed: '已完成',
-    failed: '失败'
+    failed: '失败',
+    cancelled: '已取消'
   };
-  return task.value ? map[task.value.status] : '';
+  return task.value ? map[task.value.status] || task.value.status : '';
 });
 
 const formatTime = (timestamp: number) => {
@@ -128,13 +129,15 @@ const formatLogTime = (timestamp: number) => {
 };
 
 const cancelTask = () => {
-  // TODO: 实现取消逻辑
-  console.log('取消任务', props.taskId);
+  chatStore.cancelExternalTask(props.taskId).catch((err: any) => {
+    console.error('取消任务失败', err);
+  });
 };
 
 const retryTask = () => {
-  // TODO: 实现重试逻辑
-  console.log('重试任务', props.taskId);
+  chatStore.retryExternalTask(props.taskId).catch((err: any) => {
+    console.error('重试任务失败', err);
+  });
 };
 
 /** 回到父会话对话，历史消息保持不变 */

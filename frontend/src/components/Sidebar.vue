@@ -251,7 +251,7 @@
                 active: currentExternalTaskId === task.id,
                 running: task.status === 'running',
                 completed: task.status === 'completed',
-                failed: task.status === 'failed'
+                failed: task.status === 'failed' || task.status === 'cancelled'
               }"
               @click="viewExternalTask(task.id)"
               :title="`${task.appName}: ${task.prompt}`"
@@ -282,7 +282,7 @@
                 <polyline points="20 6 9 17 4 12"></polyline>
               </svg>
               <svg
-                v-else-if="task.status === 'failed'"
+                v-else-if="task.status === 'failed' || task.status === 'cancelled'"
                 class="task-icon"
                 viewBox="0 0 24 24"
                 width="12"

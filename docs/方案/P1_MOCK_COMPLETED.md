@@ -184,49 +184,26 @@ mockExecuteTask() → setTimeout 模拟执行
 | 功能 | Mock 版本 | 真实版本(P2) |
 |---|---|---|
 | 触发方式 | 关键词检测(硬编码) | Agent 调用 dispatch 工具 |
-| App 启动 | 无(直接模拟) | spawn + CDP 连接 |
-| 任务执行 | setTimeout 3-5 秒 | 真实 CDP 操作 + 轮询结果 |
-| 结果来源 | 硬编码字符串 | 从外部 App 读取 |
-| 数据存储 | 前端 store(内存) | 后端数据库 |
-| 取消/重试 | 空操作(TODO) | 真实 kill 进程/重新派发 |
+| App 操控 | 无(直接模拟) | 操控**已打开**实例：AX + 魔法箭头（不 spawn） |
+| 任务执行 | setTimeout 3-5 秒 | helper dispatch → 轮询界面文本稳定 |
+| 结果来源 | 硬编码字符串 | 从目标 App AX 文本抽取 |
+| 数据存储 | 前端 store(内存) | 后端 database 已接 externalTasks |
+| 取消/重试 | 空操作(TODO) | IPC cancel/retry |
 
-## 下一步(P2:真实实现)
+## 下一步(P2: 魔法鼠标)
 
-Mock 版本已验证交互流程可行,接下来实现真实逻辑:
+1. **原生 helper**: `native/mac-computer-use/`（已落地骨架）
+2. **任务执行器**: `electron/service/external-task-executor.ts`
+3. **QoderWork 适配器**: `electron/service/adapters/qoderwork-adapter.ts`（a11y）
+4. **不要**再做 CDP spawn / puppeteer 探测
 
-1. **启动器**: `electron/service/external-app-launcher.ts`
-   - spawn QoderWork/千问Work/WorkBuddy
-   - 解析调试端口
-   - 健康检查
+## 已知限制（Mock 时代遗留说明）
 
-2. **CDP 客户端**: `electron/service/cdp-client.ts`
-   - WebSocket 连接
-   - 封装常用操作(navigate/evaluate/querySelector)
-
-3. **任务执行器**: `electron/service/external-task-executor.ts`
-   - 从队列取任务
-   - 启动 App → CDP 操作 → 轮询结果
-   - 状态更新推送前端
-
-4. **App 适配器**: 针对每个 App 的具体操作流程
-   - QoderWork: 填输入框 → 点击 → 等待 → 读结果
-   - 千问Work: (类似)
-   - WorkBuddy: (类似)
-
-5. **后端存储**: 迁移 externalTasks 到 database.ts
-
-## 已知限制
-
-- Mock 版本不支持真实取消/重试(按钮是空操作)
-- 关键词触发逻辑是硬编码,无法动态调整
-- 所有任务都会成功,不会失败(除非手动模拟)
-- 数据存在前端内存,刷新页面丢失
-
-这些在 P2 真实实现时会解决。
+- 关键词触发仍是硬编码（「重构」→ QoderWork）
+- 完成检测依赖 AX 文本快照，Electron 树偏瘦时需继续打磨
+- 需用户授予辅助功能权限
 
 ## 总结
 
 ✅ P1-Mock 完成,交互流程验证通过。  
-✅ 所有 6 个任务(#8-#13)已完成。  
-✅ 无新增类型错误,代码编译通过。  
-✅ 可以开始 P2(真实实现)或者先给用户演示,收集反馈。
+✅ P2 方向已纠偏为「已打开 App + 魔法鼠标」；CDP 相关代码已删除。
