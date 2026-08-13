@@ -48,7 +48,7 @@ async function ensureDir(dir: string): Promise<void> {
   await fs.mkdir(dir, { recursive: true });
 }
 
-// 读取 manifest（已安装列表）；补齐缺失的 skillName
+// 读取 manifest（已安装列表）；补齐缺失的 skillName / description
 export async function listInstalled(): Promise<InstalledSkill[]> {
   try {
     const content = await fs.readFile(getManifestPath(), 'utf-8');
@@ -56,9 +56,18 @@ export async function listInstalled(): Promise<InstalledSkill[]> {
     const skills: InstalledSkill[] = Array.isArray(parsed?.skills) ? parsed.skills : [];
     let dirty = false;
     for (const skill of skills) {
+      const skillDir = getSkillDir(skill.slug);
       if (!skill.skillName) {
-        skill.skillName = await readSkillFrontmatterName(getSkillDir(skill.slug), skill.slug);
+        skill.skillName = await readSkillFrontmatterName(skillDir, skill.slug);
         dirty = true;
+      }
+      if (!skill.description?.trim()) {
+        const seed = getOfficialSeed(skill.slug);
+        skill.description =
+          seed?.description?.trim() ||
+          (await readSkillFrontmatterDescription(skillDir)) ||
+          '';
+        if (skill.description) dirty = true;
       }
     }
     if (dirty) await writeManifest(skills);
@@ -99,6 +108,23 @@ async function readSkillFrontmatterName(skillDir: string, fallback: string): Pro
   }
 }
 
+/** 从 SKILL.md frontmatter 解析 description（一行摘要） */
+async function readSkillFrontmatterDescription(skillDir: string): Promise<string> {
+  try {
+    const md = await fs.readFile(join(skillDir, 'SKILL.md'), 'utf-8');
+    const descMatch = md.match(/^description:\s*>?\s*\n?([\s\S]*?)(?=\n[a-z_]+:|\n---)/m);
+    if (!descMatch) return '';
+    return descMatch[1]
+      .split('\n')
+      .map((l) => l.replace(/^\s*>?\s*/, '').trim())
+      .filter(Boolean)
+      .join(' ')
+      .slice(0, 120);
+  } catch {
+    return '';
+  }
+}
+
 /** 从 resources/official-skills/{slug} 复制到 userData */
 async function installOfficialBundledSkill(slug: string): Promise<InstalledSkill> {
   const seed = getOfficialSeed(slug);
@@ -120,6 +146,7 @@ async function installOfficialBundledSkill(slug: string): Promise<InstalledSkill
   return upsertManifest({
     slug,
     name: seed.name,
+    description: seed.description || (await readSkillFrontmatterDescription(skillDir)),
     skillName,
     version: seed.version || '',
     installedAt: Date.now()
@@ -161,6 +188,10 @@ export async function installSkill(slug: string): Promise<InstalledSkill> {
   return upsertManifest({
     slug,
     name: detail.name || slug,
+    description:
+      detail.description?.trim() ||
+      (await readSkillFrontmatterDescription(skillDir)) ||
+      '',
     skillName,
     version: detail.version || '',
     installedAt: Date.now()

@@ -101,10 +101,19 @@ export interface SkillFile {
 export interface InstalledSkill {
   slug: string;
   name: string;           // 展示名（可中文）
+  /** 斜杠菜单等处展示的一句话说明 */
+  description?: string;
   /** Agent Skill 工具用的 frontmatter name；缺失时回退 slug */
   skillName?: string;
   version: string;
   installedAt: number;
+}
+
+/** 输入框中已挂载、等待随下一条消息调用的技能 */
+export interface ComposerAttachedSkill {
+  slug: string;
+  name: string;
+  skillName?: string;
 }
 
 // 官方静态技能（随客户端分发的展示清单）

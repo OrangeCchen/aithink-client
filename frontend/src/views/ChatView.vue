@@ -11,6 +11,7 @@
       <div class="chat-header">
         <span class="chat-title">{{ sessionTitle }}</span>
       </div>
+      <LearningContextBar />
       <div
         class="message-list"
         ref="messageListRef"
@@ -80,6 +81,7 @@
 import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useChatStore } from '@/stores/chat';
 import MessageBubble from '@/components/MessageBubble.vue';
+import LearningContextBar from '@/components/LearningContextBar.vue';
 import ThinkingIndicator from '@/components/ThinkingIndicator.vue';
 import InputBar from '@/components/InputBar.vue';
 import SideChatPanel from '@/components/SideChatPanel.vue';
@@ -136,11 +138,11 @@ const runningTool = computed(() =>
 );
 
 const thinkingLabel = computed(() => {
-  if (runningTool.value) return '深度思考中';
-  if (chatStore.streamPhase === 'running_tools') return '执行工具';
-  if (chatStore.streamPhase === 'syncing_skills') return '准备环境';
-  if (chatStore.streamPhase === 'calling_model') return '连接模型';
-  return '正在组织回复';
+  if (runningTool.value) return '正在执行工具';
+  if (chatStore.streamPhase === 'running_tools') return '正在执行工具';
+  if (chatStore.streamPhase === 'syncing_skills') return '正在准备环境';
+  if (chatStore.streamPhase === 'calling_model') return '等待模型响应';
+  return '生成回复中';
 });
 
 /** 有首字后继续执行工具 / 等模型时也要展示进度 */
@@ -320,7 +322,7 @@ onUnmounted(() => {
 .message-list {
   flex: 1;
   overflow-y: auto;
-  padding: 20px 0;
+  padding: 16px 0 12px;
   user-select: text;
 }
 

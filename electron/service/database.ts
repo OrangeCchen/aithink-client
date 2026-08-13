@@ -229,11 +229,12 @@ export class DatabaseService {
 
   async updateSpace(
     id: string,
-    patch: Partial<Pick<WorkspaceSpace, 'name' | 'folderPath'>>
+    patch: Partial<Pick<WorkspaceSpace, 'name' | 'folderPath' | 'examProfile'>>
   ): Promise<WorkspaceSpace | null> {
     const space = this.data.spaces.find((s) => s.id === id);
     if (!space) return null;
     if (patch.name !== undefined) space.name = patch.name;
+    if (patch.examProfile !== undefined) space.examProfile = patch.examProfile;
     if (patch.folderPath !== undefined && patch.folderPath !== space.folderPath) {
       space.folderPath = patch.folderPath;
       // 同步该空间下会话的工作目录，避免旧路径残留

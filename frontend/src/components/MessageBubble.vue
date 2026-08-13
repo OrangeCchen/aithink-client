@@ -62,14 +62,103 @@
         </div>
       </section>
 
+      <!-- 用户气泡：保留技能胶囊 -->
       <div
-        v-else-if="message.content"
-        class="markdown-body"
-        :class="{ 'streaming-plain': streaming }"
+        v-else-if="message.content && message.role === 'user'"
+        class="markdown-body user-bubble"
       >
-        <div v-if="streaming" class="streaming-text">{{ message.content }}</div>
-        <div v-else v-html="renderedContent"></div>
+        <div v-if="message.attachedSkill" class="user-skill-chip">
+          <span class="user-skill-icon" aria-hidden="true">⌁</span>
+          <span>{{ message.attachedSkill.name }}</span>
+        </div>
+        <div v-html="renderedContent"></div>
       </div>
+
+      <template v-else-if="message.content || visibleTools.length > 0">
+        <!-- 处理过程：过程文案 -->
+        <details
+          v-if="progressText"
+          class="think-block"
+          :open="streaming && !answerText"
+        >
+          <summary class="think-label">
+            <span>处理过程</span>
+            <span v-if="!(streaming && !answerText)" class="think-toggle">展开</span>
+          </summary>
+          <div class="think-rail">
+            <div
+              class="markdown-body think-body"
+              :class="{ 'streaming-plain': streaming && !answerText }"
+            >
+              <div v-if="streaming && !answerText" class="streaming-text">{{ progressText }}</div>
+              <div v-else v-html="renderedProgress"></div>
+            </div>
+          </div>
+        </details>
+
+        <!-- 已完成工作：紧挨处理过程下方 -->
+        <details
+          v-if="visibleTools.length > 0"
+          class="work-summary"
+          :open="isTerminatedMessage"
+        >
+          <summary>
+            {{ workSummaryTitle }}
+            <span v-if="!isTerminatedMessage" class="work-hint">点击查看</span>
+          </summary>
+          <div class="work-list">
+            <div v-for="tool in visibleTools" :key="tool.id" class="work-item">
+              <div class="work-item-head">
+                <span class="work-name">{{ friendlyToolName(tool.name) }}</span>
+                <span class="work-status" :class="tool.status">{{ statusLabel(tool.status) }}</span>
+              </div>
+              <div v-if="formatToolInputPreview(tool.name, tool.input)" class="work-input">
+                {{ formatToolInputPreview(tool.name, tool.input) }}
+              </div>
+              <div v-if="describeToolPayload(tool.output)" class="work-payload">
+                {{ describeToolPayload(tool.output) }}
+              </div>
+              <details
+                v-if="tool.output?.trim() && (isLargeToolOutput(tool.output) || tool.output.length > 160)"
+                class="work-expand"
+              >
+                <summary>查看返回内容</summary>
+                <pre class="work-output-block">{{ formatToolOutputBlock(tool.output) }}</pre>
+              </details>
+              <div
+                v-else-if="formatToolOutputPreview(tool.output)"
+                class="work-output"
+              >
+                {{ formatToolOutputPreview(tool.output) }}
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <!-- 正式回答：白底文档流 -->
+        <section v-if="answerText" class="report-block">
+          <div class="report-toolbar">
+            <button
+              type="button"
+              class="report-copy-btn"
+              title="复制"
+              @click="copyAnswer"
+            >
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7">
+                <rect x="9" y="9" width="13" height="13" rx="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
+          </div>
+          <div
+            class="markdown-body report-body"
+            :class="{ 'streaming-plain': streaming }"
+          >
+            <div v-if="streaming" class="streaming-text">{{ answerText }}</div>
+            <div v-else v-html="renderedAnswer"></div>
+          </div>
+        </section>
+      </template>
 
       <!-- 用户消息携带的图片：横向滚动 -->
       <div v-if="message.images && message.images.length > 0" class="message-images">
@@ -83,31 +172,13 @@
         />
       </div>
 
-      <!-- 工具细节默认收起：主界面不展示「执行命令」长卡片 -->
-      <details
-        v-if="visibleTools.length > 0"
-        class="work-summary"
-        :open="isTerminatedMessage"
-      >
-        <summary>
-          {{ workSummaryTitle }}
-          <span v-if="!isTerminatedMessage" class="work-hint">点击查看</span>
-        </summary>
-        <div class="work-list">
-          <div v-for="tool in visibleTools" :key="tool.id" class="work-item">
-            <div class="work-item-head">
-              <span class="work-name">{{ friendlyToolName(tool.name) }}</span>
-              <span class="work-status" :class="tool.status">{{ statusLabel(tool.status) }}</span>
-            </div>
-            <div v-if="formatToolInputPreview(tool.name, tool.input)" class="work-input">
-              {{ formatToolInputPreview(tool.name, tool.input) }}
-            </div>
-            <div v-if="formatToolOutputPreview(tool.output)" class="work-output">
-              {{ formatToolOutputPreview(tool.output) }}
-            </div>
-          </div>
-        </div>
-      </details>
+      <DepositionBar
+        v-if="showDepositionBar"
+        :message-id="message.id"
+        :content="depositionContent"
+        :default-title="depositionTitle"
+        :sources="depositionSources"
+      />
     </div>
 
     <!-- 图片放大预览弹窗 -->
@@ -125,12 +196,94 @@ import { computed, ref } from 'vue';
 import { marked } from 'marked';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
-import type { Message, ToolCall } from '@shared/types';
+import { ElMessage } from 'element-plus';
+import type { DepositionSource, Message, ToolCall } from '@shared/types';
 import {
   friendlyToolName,
   formatToolInputPreview,
-  formatToolOutputPreview
+  formatToolOutputPreview,
+  formatToolOutputBlock,
+  describeToolPayload,
+  isLargeToolOutput
 } from '@/utils/toolPreview';
+import DepositionBar from '@/components/DepositionBar.vue';
+import { useExamProfileStore } from '@/stores/examProfile';
+import { useChatStore } from '@/stores/chat';
+
+/** 把渐进说明与最终报告拆开 */
+function splitAssistantContent(content: string): { progress: string; answer: string } {
+  const text = content || '';
+  const markers = [
+    /^#{1,3}\s*总览\s*$/m,
+    /^#{1,3}\s*评审报告\s*$/m,
+    /^#{1,3}\s*判定报告\s*$/m,
+    /^#{1,3}\s*审校报告\s*$/m,
+    /^\*\*总览\*\*/m,
+    /^#{1,3}\s*\[1\]/m
+  ];
+  for (const re of markers) {
+    const m = text.match(re);
+    if (m?.index != null && m.index > 0) {
+      return {
+        progress: text.slice(0, m.index).trim(),
+        answer: text.slice(m.index).trim()
+      };
+    }
+  }
+  // 短引导语（如「请到右侧作答」）单独作为过程
+  if (
+    /请到右侧|已收到你的选择|继续处理|联网可达|先快速核验/.test(text) &&
+    text.length < 280 &&
+    !/^#{1,3}\s/m.test(text)
+  ) {
+    return { progress: text.trim(), answer: '' };
+  }
+  return { progress: '', answer: text.trim() };
+}
+
+function renderMarkdown(content: string): string {
+  marked.setOptions({
+    breaks: true,
+    gfm: true
+  });
+
+  const renderer = new marked.Renderer();
+  const originalLink = renderer.link.bind(renderer);
+  renderer.link = (token: any) => {
+    const href = token.href || '';
+    const html = originalLink(token);
+    if (href === '#new-session') {
+      return html.replace(
+        '<a',
+        '<a class="action-link" onclick="window.__handleNewSession(); return false;"'
+      );
+    }
+    return html.replace(
+      '<a',
+      '<a onclick="window.electronAPI.openExternal(this.href); return false;"'
+    );
+  };
+
+  const rawHtml = marked.parse(content || '', {
+    async: false,
+    renderer
+  }) as string;
+
+  return rawHtml.replace(
+    /<pre><code class="language-(\w+)">([\s\S]*?)<\/code><\/pre>/g,
+    (_match, lang, code) => {
+      try {
+        if (hljs.getLanguage(lang)) {
+          const highlighted = hljs.highlight(code, { language: lang }).value;
+          return `<pre><code class="hljs language-${lang}">${highlighted}</code></pre>`;
+        }
+      } catch {
+        // ignore
+      }
+      return `<pre><code class="hljs">${code}</code></pre>`;
+    }
+  );
+}
 
 const props = defineProps<{
   message: Message;
@@ -138,13 +291,16 @@ const props = defineProps<{
   streaming?: boolean;
 }>();
 
+const examStore = useExamProfileStore();
+const chatStore = useChatStore();
+
 // 并发派发区块折叠状态（默认展开，用户可手动折叠）
 const dispatchCollapsed = ref(false);
 // 图片放大预览
 const imagePreviewVisible = ref(false);
 const imagePreviewUrl = ref('');
 
-/** 主界面不展示 AskUserQuestion（已在右侧面板） */
+/** 主界面不展示 AskUserQuestion（已改到输入框上方作答） */
 const visibleTools = computed(() =>
   (props.message.toolCalls || []).filter((t) => t.name !== 'AskUserQuestion')
 );
@@ -212,50 +368,72 @@ const closeImagePreview = () => {
   imagePreviewUrl.value = '';
 };
 
-const renderedContent = computed(() => {
-  marked.setOptions({
-    breaks: true,
-    gfm: true
-  });
-
-  const renderer = new marked.Renderer();
-  const originalLink = renderer.link.bind(renderer);
-  renderer.link = (token: any) => {
-    const href = token.href || '';
-    const html = originalLink(token);
-    // 兼容历史消息：新消息已不再内嵌「新建对话」，引导改在输入框区域
-    if (href === '#new-session') {
-      return html.replace(
-        '<a',
-        '<a class="action-link" onclick="window.__handleNewSession(); return false;"'
-      );
-    }
-    return html.replace(
-      '<a',
-      '<a onclick="window.electronAPI.openExternal(this.href); return false;"'
-    );
-  };
-
-  const rawHtml = marked.parse(props.message.content || '', {
-    async: false,
-    renderer
-  }) as string;
-
-  return rawHtml.replace(
-    /<pre><code class="language-(\w+)">([\s\S]*?)<\/code><\/pre>/g,
-    (_match, lang, code) => {
-      try {
-        if (hljs.getLanguage(lang)) {
-          const highlighted = hljs.highlight(code, { language: lang }).value;
-          return `<pre><code class="hljs language-${lang}">${highlighted}</code></pre>`;
-        }
-      } catch {
-        // ignore
-      }
-      return `<pre><code class="hljs">${code}</code></pre>`;
-    }
-  );
+const depositionContent = computed(() => {
+  const raw = (props.message.content || '').trim();
+  if (!raw) return '';
+  if (raw.startsWith('⏳ 正在综合')) return '';
+  return raw;
 });
+
+const depositionTitle = computed(() => {
+  const fromBlock = props.message.blockTitle?.trim();
+  if (fromBlock && fromBlock !== '任务结果' && fromBlock !== '汇总回答') {
+    return fromBlock;
+  }
+  return depositionContent.value.split('\n')[0]?.slice(0, 60) || '学习笔记';
+});
+
+const depositionSources = computed((): DepositionSource[] => {
+  if (props.message.kind === 'task-result') {
+    const apps = [
+      ...new Set(
+        chatStore.externalTasks
+          .filter(
+            (t) =>
+              t.sessionId === props.message.sessionId &&
+              (t.status === 'completed' || t.status === 'failed')
+          )
+          .map((t) => t.appName)
+      )
+    ];
+    return [{ type: 'external-summary', apps: apps.length ? apps : undefined }];
+  }
+  return [{ type: 'local-llm' }];
+});
+
+const showDepositionBar = computed(
+  () =>
+    examStore.isExamMode &&
+    !props.streaming &&
+    props.message.role === 'assistant' &&
+    props.message.kind !== 'dispatch' &&
+    depositionContent.value.length >= 8
+);
+
+const contentParts = computed(() => {
+  if (props.message.role === 'user' || props.message.kind) {
+    return { progress: '', answer: props.message.content || '' };
+  }
+  return splitAssistantContent(props.message.content || '');
+});
+
+const progressText = computed(() => contentParts.value.progress);
+const answerText = computed(() => contentParts.value.answer);
+
+const renderedContent = computed(() => renderMarkdown(props.message.content || ''));
+const renderedProgress = computed(() => renderMarkdown(progressText.value));
+const renderedAnswer = computed(() => renderMarkdown(answerText.value));
+
+const copyAnswer = async () => {
+  const text = answerText.value || props.message.content || '';
+  if (!text.trim()) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    ElMessage.success('已复制');
+  } catch {
+    ElMessage.error('复制失败');
+  }
+};
 </script>
 
 <style scoped>
@@ -270,20 +448,172 @@ const renderedContent = computed(() => {
 }
 
 .message-content {
-  max-width: 720px;
+  max-width: none;
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 18px;
 }
 
 .message-bubble.user .message-content {
   width: auto;
-  max-width: 72%;
+  max-width: min(720px, 78%);
   align-items: flex-end;
 }
 
-/* 助手：去灰底气泡与头像，正文直接铺在对话区 */
+/* 处理过程 */
+.think-block {
+  padding: 0;
+  background: transparent;
+}
+
+.think-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  padding: 0 2px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #8f8f8f;
+  font-family: inherit;
+}
+
+.think-label::-webkit-details-marker {
+  display: none;
+}
+
+.think-toggle {
+  font-size: 12px;
+  color: #b8b8b8;
+}
+
+.think-block[open] .think-toggle {
+  display: none;
+}
+
+.think-rail {
+  margin-top: 10px;
+  padding: 4px 4px 6px 16px;
+  border-left: 1.5px solid #e8e8e8;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 正式报告：白底文档流 + 边框 */
+.report-block {
+  position: relative;
+  width: 100%;
+  border: 1px solid #e5e5e5;
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.report-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 16px 0;
+  margin-bottom: 0;
+}
+
+.report-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #b0b0b0;
+  cursor: pointer;
+}
+
+.report-copy-btn:hover {
+  background: #f5f5f5;
+  color: #444;
+}
+
+/* 需压过后面的 .markdown-body { padding: 0 } */
+.markdown-body.report-body {
+  padding: 4px 28px 24px;
+  background: transparent;
+  font-size: 15px;
+  line-height: 1.8;
+  color: #222;
+}
+
+.report-body :deep(h1),
+.report-body :deep(h2),
+.report-body :deep(h3) {
+  margin: 1.4em 0 0.55em;
+  font-weight: 700;
+  color: #111;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+}
+
+.report-body :deep(h1:first-child),
+.report-body :deep(h2:first-child),
+.report-body :deep(h3:first-child) {
+  margin-top: 0;
+}
+
+.report-body :deep(h1) {
+  font-size: 20px;
+}
+
+.report-body :deep(h2) {
+  font-size: 18px;
+}
+
+.report-body :deep(h3) {
+  font-size: 16px;
+}
+
+.report-body :deep(p) {
+  margin: 0.75em 0;
+}
+
+.report-body :deep(ul),
+.report-body :deep(ol) {
+  margin: 0.65em 0;
+  padding-left: 1.35em;
+}
+
+.report-body :deep(li) {
+  margin: 0.35em 0;
+}
+
+.report-body :deep(li > ul),
+.report-body :deep(li > ol) {
+  margin: 0.2em 0;
+}
+
+.report-body :deep(hr) {
+  border: none;
+  border-top: 1px solid #ebebeb;
+  margin: 22px 0;
+}
+
+.report-body :deep(strong) {
+  font-weight: 700;
+  color: #111;
+}
+
+.report-body :deep(blockquote) {
+  margin: 0.85em 0;
+  padding: 0 0 0 12px;
+  border-left: 2px solid #e5e5e5;
+  background: transparent;
+  color: #666;
+}
+
+/* 助手 markdown 基底 */
 .markdown-body {
   padding: 0;
   background: transparent;
@@ -313,13 +643,44 @@ const renderedContent = computed(() => {
   word-break: break-word;
 }
 
-.message-bubble.user .markdown-body {
+.message-bubble.user .markdown-body.user-bubble {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
   padding: 10px 14px;
   background: var(--color-accent);
   color: #ffffff;
   border-radius: 16px 16px 4px 16px;
   font-size: var(--font-md);
   line-height: var(--leading-normal);
+}
+
+.user-skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 2px 8px 2px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.user-skill-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.2);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 /* 用户消息携带的图片：横向滚动 */
@@ -496,10 +857,39 @@ const renderedContent = computed(() => {
   margin: 12px 0;
 }
 
+.think-body {
+  padding: 2px 8px 2px 2px;
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: #8a8a8a;
+  font-family: inherit;
+}
+
+.think-body :deep(p) {
+  margin: 0.5em 0;
+}
+
+.think-body :deep(p:first-child) {
+  margin-top: 0;
+}
+
+.think-body :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.think-body :deep(ul),
+.think-body :deep(ol) {
+  margin: 0.45em 0;
+  padding-left: 1.25em;
+}
+
 .work-summary {
-  margin-top: 2px;
   font-size: 12px;
   color: var(--color-text-muted);
+}
+
+.think-block + .work-summary {
+  margin-top: -10px;
 }
 
 .work-summary summary {
@@ -525,19 +915,24 @@ const renderedContent = computed(() => {
 }
 
 .work-list {
-  margin-top: 6px;
+  margin-top: 8px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding-left: 2px;
+  gap: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #f5f5f5;
+  border: 1px solid #ececec;
 }
 
 .work-item {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 6px 0;
-  border-bottom: 1px dashed var(--color-border);
+  padding: 8px 0;
+  border-bottom: 1px solid #e8e8e8;
 }
 
 .work-item:last-child {
@@ -565,6 +960,56 @@ const renderedContent = computed(() => {
 
 .work-output {
   color: var(--color-text-muted);
+}
+
+.work-payload {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #c4893a;
+  padding-left: 2px;
+}
+
+.work-expand {
+  margin: 0;
+  padding: 0;
+}
+
+.work-expand summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  font-size: 11.5px;
+  color: #9a9a9a;
+  padding: 2px 0;
+}
+
+.work-expand summary::-webkit-details-marker {
+  display: none;
+}
+
+.work-expand summary::before {
+  content: '▸ ';
+  color: #c0c0c0;
+}
+
+.work-expand[open] summary::before {
+  content: '▾ ';
+}
+
+.work-output-block {
+  margin: 4px 0 0;
+  max-height: 140px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fafafa;
+  border: 1px solid #e8e8e8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #777;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .work-name {

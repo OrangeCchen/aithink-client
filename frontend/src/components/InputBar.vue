@@ -8,19 +8,41 @@
       <button class="waiting-action" @click="handleNewSession">新建对话</button>
     </div>
 
-    <div class="input-container">
+    <!-- Agent 提问：覆盖输入区，避免去右侧面板来回拖 -->
+    <div v-if="hasPendingQuestion" class="question-overlay">
+      <QuestionPanel variant="composer" />
+    </div>
+
+    <div class="input-container" :class="{ covered: hasPendingQuestion }">
       <!-- 斜杠命令：已安装技能菜单 -->
       <div v-if="showSlashMenu && filteredSlashSkills.length > 0" class="slash-menu">
-        <div class="slash-menu-title">调用技能</div>
+        <div class="slash-menu-title">技能（{{ filteredSlashSkills.length }}）</div>
         <button
           v-for="skill in filteredSlashSkills"
           :key="skill.slug"
           class="slash-item"
           @mousedown.prevent="selectSlashSkill(skill)"
         >
-          <span class="slash-item-name">{{ skill.name }}</span>
-          <span class="slash-item-hint">/{{ skill.skillName || skill.slug }}</span>
+          <span class="slash-item-icon" aria-hidden="true">⌁</span>
+          <span class="slash-item-copy">
+            <span class="slash-item-name">{{ skill.name }}</span>
+            <span v-if="skill.description" class="slash-item-desc">{{ skill.description }}</span>
+          </span>
         </button>
+      </div>
+
+      <div v-if="selectedSkill" class="selected-skill-row">
+        <span class="selected-skill-chip">
+          <span class="selected-skill-icon" aria-hidden="true">⌁</span>
+          <span>{{ selectedSkill.name }}</span>
+          <button
+            type="button"
+            class="selected-skill-remove"
+            :aria-label="`移除技能 ${selectedSkill.name}`"
+            title="移除技能"
+            @click="removeSelectedSkill"
+          >×</button>
+        </span>
       </div>
 
       <el-input
@@ -34,6 +56,8 @@
         @compositionstart="isComposing = true"
         @compositionend="isComposing = false"
         @keydown.enter.exact="onEnterKeydown"
+        @keydown.esc="showSlashMenu = false"
+        @keydown.backspace="onBackspaceKeydown"
         :disabled="streaming || isWaitingExternalTasks"
       />
 
@@ -186,15 +210,21 @@ import { useChatStore } from '@/stores/chat';
 import { useModelStore } from '@/stores/model';
 import { useSkillStore } from '@/stores/skill';
 import { useSpaceStore } from '@/stores/space';
+import { useQuestionStore } from '@/stores/question';
+import QuestionPanel from '@/components/QuestionPanel.vue';
 import { ElMessage } from 'element-plus';
 import type { ExternalAppId } from '@shared/types';
+import type { ComposerAttachedSkill } from '@shared/skill-types';
 
 const chatStore = useChatStore();
 const modelStore = useModelStore();
 const skillStore = useSkillStore();
 const spaceStore = useSpaceStore();
+const questionStore = useQuestionStore();
+const hasPendingQuestion = computed(() => questionStore.hasPending);
 
 const inputText = ref('');
+const selectedSkill = ref<ComposerAttachedSkill | null>(null);
 const isComposing = ref(false);
 const textareaRef = ref();
 const spaceMenuOpen = ref(false);
@@ -390,6 +420,7 @@ const filteredSlashSkills = computed(() => {
   return list.filter(
     (s) =>
       s.name.toLowerCase().includes(q) ||
+      (s.description || '').toLowerCase().includes(q) ||
       (s.skillName || s.slug).toLowerCase().includes(q)
   );
 });
@@ -398,6 +429,14 @@ const applyPendingInput = () => {
   const pending = chatStore.consumePendingInput();
   if (pending) {
     inputText.value = pending;
+    focusTextarea();
+  }
+};
+
+const applyPendingSkill = () => {
+  const pending = chatStore.consumePendingSkill();
+  if (pending) {
+    selectedSkill.value = pending;
     focusTextarea();
   }
 };
@@ -423,28 +462,53 @@ const onInput = () => {
   }
 };
 
-const selectSlashSkill = (skill: { name: string; slug: string; skillName?: string }) => {
-  const id = skill.skillName || skill.slug;
-  const prompt =
-    skill.name && skill.name !== id
-      ? `请使用 Skill 工具调用技能「${id}」（${skill.name}），并严格按其 SKILL.md 流程开始执行：`
-      : `请使用 Skill 工具调用技能「${id}」，并严格按其 SKILL.md 流程开始执行：`;
+const selectSlashSkill = (skill: ComposerAttachedSkill) => {
+  selectedSkill.value = {
+    slug: skill.slug,
+    name: skill.name,
+    skillName: skill.skillName
+  };
   inputText.value = inputText.value.replace(/(?:^|\n)?\/[^\s/]*$/, (m) => {
     const prefix = m.startsWith('\n') ? '\n' : '';
-    return `${prefix}${prompt}`;
+    return prefix;
   });
   showSlashMenu.value = false;
   focusTextarea();
+};
+
+const removeSelectedSkill = () => {
+  selectedSkill.value = null;
+  focusTextarea();
+};
+
+const onBackspaceKeydown = () => {
+  if (!inputText.value && selectedSkill.value) {
+    removeSelectedSkill();
+  }
+};
+
+const buildSkillPrompt = (skill: ComposerAttachedSkill, userText: string) => {
+  const id = skill.skillName || skill.slug;
+  const invocation =
+    skill.name && skill.name !== id
+      ? `请使用 Skill 工具调用技能「${id}」（${skill.name}），并严格按其 SKILL.md 流程执行。`
+      : `请使用 Skill 工具调用技能「${id}」，并严格按其 SKILL.md 流程执行。`;
+  return `${invocation}\n\n用户要求：${userText}`;
 };
 
 watch(() => chatStore.pendingInput, (val) => {
   if (val) applyPendingInput();
 });
 
+watch(() => chatStore.pendingSkill, (val) => {
+  if (val) applyPendingSkill();
+});
+
 onMounted(() => {
   if (skillStore.installed.length === 0) skillStore.loadInstalled();
   if (spaceStore.spaces.length === 0) spaceStore.loadSpaces();
   applyPendingInput();
+  applyPendingSkill();
   document.addEventListener('mousedown', onDocClick);
 });
 
@@ -464,18 +528,28 @@ const handleSend = async () => {
   const text = inputText.value.trim();
   if (!text || streaming.value || isWaitingExternalTasks.value) return;
 
+  const skill = selectedSkill.value
+    ? {
+        slug: selectedSkill.value.slug,
+        name: selectedSkill.value.name,
+        skillName: selectedSkill.value.skillName
+      }
+    : undefined;
+  const prompt = skill ? buildSkillPrompt(skill, text) : text;
+
   if (dispatchMode.value === 'external') {
     if (externalAppTargets.value.length === 0) {
       ElMessage.warning('请至少选择一个外部 App');
       return;
     }
-    await chatStore.dispatchToExternalApp(text, selectedModel.value);
+    await chatStore.dispatchToExternalApp(prompt, selectedModel.value, text);
   } else {
     const images = pastedImages.value.length > 0 ? [...pastedImages.value] : undefined;
-    await chatStore.sendMessage(text, selectedModel.value, images);
+    await chatStore.sendMessage(prompt, selectedModel.value, images, text, skill);
   }
 
   inputText.value = '';
+  selectedSkill.value = null;
   pastedImages.value = [];
 };
 
@@ -514,8 +588,26 @@ defineExpose({ appendText });
 
 <style scoped>
 .input-bar {
-  padding: 16px 24px 20px;
+  position: relative;
+  padding: 12px 28px 16px;
   background: var(--color-bg);
+}
+
+.question-overlay {
+  position: relative;
+  z-index: 5;
+  margin-bottom: 10px;
+  max-height: min(52vh, 420px);
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-bg);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.08);
+}
+
+.input-container.covered {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 /* 等待外部任务时的引导条 */
@@ -716,8 +808,8 @@ defineExpose({ appendText });
 
 .slash-item {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
   width: 100%;
   padding: 8px 10px;
   border: none;
@@ -727,6 +819,29 @@ defineExpose({ appendText });
   text-align: left;
 }
 
+.slash-item-icon,
+.selected-skill-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border-radius: 7px;
+  color: var(--color-text-primary);
+  background: var(--color-bg-soft);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.slash-item-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .slash-item:hover {
   background: var(--color-bg-hover);
 }
@@ -734,12 +849,63 @@ defineExpose({ appendText });
 .slash-item-name {
   font-size: var(--font-sm);
   color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.slash-item-desc {
+  font-size: var(--font-xs, 11px);
+  color: var(--color-text-muted);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .slash-item-hint {
   font-size: var(--font-xs, 11px);
   color: var(--color-text-muted);
   font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+}
+
+.selected-skill-row {
+  display: flex;
+  padding: 10px 12px 0;
+}
+
+.selected-skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: calc(100% - 4px);
+  min-height: 30px;
+  padding: 3px 5px 3px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  font-size: var(--font-sm);
+  line-height: 1;
+}
+
+.selected-skill-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.selected-skill-remove:hover {
+  background: var(--color-border);
+  color: var(--color-text-primary);
 }
 
 .input-container:focus-within {

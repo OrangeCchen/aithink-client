@@ -1,12 +1,14 @@
 <template>
-  <div class="question-panel">
+  <div class="question-panel" :class="`variant-${variant}`">
     <div v-if="!hasPending" class="empty-hint">
       <p>暂无待回答问题</p>
       <p class="hint-sub">Agent 需要你做选择时，问题会出现在这里</p>
     </div>
 
     <template v-else>
-      <h2 class="panel-heading">请回答以下问题</h2>
+      <h2 class="panel-heading">
+        {{ variant === 'composer' ? '请选择后继续' : '请回答以下问题' }}
+      </h2>
 
       <div
         v-for="(q, index) in pending!.questions"
@@ -94,6 +96,11 @@ import { computed, reactive, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useQuestionStore } from '@/stores/question';
 import type { AskUserQuestionItem } from '@shared/types';
+
+const { variant = 'panel' } = defineProps<{
+  /** composer：覆盖输入框上方；panel：右侧栏 */
+  variant?: 'composer' | 'panel';
+}>();
 
 const questionStore = useQuestionStore();
 
@@ -192,6 +199,21 @@ const onAiDecide = async () => {
   flex-direction: column;
   gap: 16px;
   min-height: 120px;
+}
+
+.question-panel.variant-composer {
+  padding: 14px 16px 16px;
+  min-height: 0;
+}
+
+.question-panel.variant-composer .panel-heading {
+  font-size: 15px;
+}
+
+.question-panel.variant-composer .actions {
+  position: sticky;
+  bottom: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.7), #fff 35%);
 }
 
 .empty-hint {

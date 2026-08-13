@@ -4,10 +4,13 @@ import type { AskUserQuestionAnswerPayload, AskUserQuestionItem, StreamEvent } f
 import { loadConfig } from './config-service.js';
 import { runOpenAICompatibleLoop } from './agent/openai-loop.js';
 import { runAnthropicLoop } from './agent/anthropic-loop.js';
+import type { HistoryTurn } from './agent/conversation-history.js';
 
 export interface QueryOptions {
   prompt: string;
   images?: string[];
+  /** 多轮对话历史（含当前 user）；缺省时退化为仅当前 prompt */
+  history?: HistoryTurn[];
   model: string;
   workspacePath: string;
   onEvent: (event: StreamEvent) => void;
@@ -114,6 +117,7 @@ export async function startQuery(sessionId: string, options: QueryOptions): Prom
         sessionId,
         prompt: options.prompt,
         images: options.images,
+        history: options.history,
         model: options.model,
         apiKey: config.qwen.apiKey,
         baseUrl: normalizeOpenAIBaseUrl(config.qwen.baseUrl),
@@ -130,6 +134,7 @@ export async function startQuery(sessionId: string, options: QueryOptions): Prom
         sessionId,
         prompt: options.prompt,
         images: options.images,
+        history: options.history,
         model: options.model,
         apiKey: config.claude.apiKey,
         baseUrl: config.claude.baseUrl || 'https://api.anthropic.com',

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import type { SpaceFileEntry, WorkspaceSpace } from '@shared/types';
+import { useExamProfileStore } from './examProfile';
 
 export const useSpaceStore = defineStore('space', {
   state: () => ({
@@ -64,6 +65,7 @@ export const useSpaceStore = defineStore('space', {
       if (!space) return;
       this.activeSpaceId = spaceId;
       this.expandedIds[spaceId] = true;
+      void useExamProfileStore().loadSyllabusForActiveSpace();
     },
 
     toggleExpanded(spaceId: string) {

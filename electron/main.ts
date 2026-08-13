@@ -11,6 +11,7 @@ import {
 import { registerSkillHandlers } from './controller/skill.js';
 import { registerSpaceHandlers } from './controller/space.js';
 import { registerExternalTaskHandlers } from './controller/external-task.js';
+import { registerExamProfileHandlers } from './controller/exam-profile.js';
 import { loadConfig } from './service/config-service.js';
 import { startHttpServer, getLastExtensionPing } from './service/http-server.js';
 import { registerMediaProtocol } from './service/media-protocol.js';
@@ -91,6 +92,22 @@ ipcMain.handle('dialog:open-folder', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory', 'createDirectory'],
     title: '选择工作空间文件夹',
+    buttonLabel: '选择'
+  });
+
+  return result;
+});
+
+ipcMain.handle('dialog:open-syllabus-file', async () => {
+  if (!mainWindow) return { canceled: true };
+
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    title: '选择考纲文件',
+    filters: [
+      { name: '考纲', extensions: ['json', 'md', 'markdown'] },
+      { name: '全部', extensions: ['*'] }
+    ],
     buttonLabel: '选择'
   });
 
@@ -202,6 +219,7 @@ app.whenReady().then(async () => {
   // 注册 IPC 处理器
   await registerChatHandlers();
   await registerSpaceHandlers();
+  await registerExamProfileHandlers();
   registerConfigHandlers();
   registerRecordingHandlers();
   registerTranscriptionHandlers();

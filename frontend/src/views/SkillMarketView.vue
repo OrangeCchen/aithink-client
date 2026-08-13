@@ -111,7 +111,7 @@
             <template v-if="skillStore.isInstalled(skill.slug)">
               <button
                 class="use-btn"
-                @click.stop="useSkill(skill.name, skill.slug)"
+                @click.stop="useSkill(skill.name, skill.slug, resolveSkillName(skill.slug))"
                 title="在对话中使用"
               >
                 立即使用
@@ -181,7 +181,7 @@
           <div class="card-badges">
             <button
               class="use-btn"
-              @click.stop="useSkill(skill.name, resolveSkillName(skill.slug))"
+              @click.stop="useSkill(skill.name, skill.slug, resolveSkillName(skill.slug))"
               title="在对话中使用"
             >
               立即使用
@@ -290,7 +290,7 @@
               <template v-else>
                 <button
                   class="btn-primary"
-                  @click="useSkill(detail.name, resolveSkillName(detail.slug))"
+                  @click="useSkill(detail.name, detail.slug, resolveSkillName(detail.slug))"
                 >
                   立即使用
                 </button>
@@ -402,22 +402,17 @@ const permissionPlaceholders = [
   '视技能而定：执行本地命令（需你确认）'
 ];
 
-/** 构造调用提示：必须带 Agent 认的 skillName（kebab-case），中文名仅作说明 */
-const buildSkillPrompt = (displayName: string, skillName: string) => {
-  const id = skillName || displayName;
-  if (displayName && displayName !== id) {
-    return `请使用 Skill 工具调用技能「${id}」（${displayName}），并严格按其 SKILL.md 流程开始执行：`;
-  }
-  return `请使用 Skill 工具调用技能「${id}」，并严格按其 SKILL.md 流程开始执行：`;
-};
-
 const resolveSkillName = (slug: string): string => {
   const installed = skillStore.installed.find((s) => s.slug === slug);
   return installed?.skillName || slug;
 };
 
-const useSkill = (displayName: string, skillName?: string) => {
-  chatStore.setPendingInput(buildSkillPrompt(displayName, skillName || displayName));
+const useSkill = (displayName: string, slug: string, skillName?: string) => {
+  chatStore.setPendingSkill({
+    slug,
+    name: displayName,
+    skillName: skillName || slug
+  });
   skillStore.closeDetail();
   uiStore.showChat();
 };

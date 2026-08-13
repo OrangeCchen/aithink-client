@@ -136,12 +136,25 @@ async function toolLoadSkill(args: Record<string, unknown>, ctx: ToolContext): P
     throw new Error('工作区尚未同步技能，请先在技能中心安装');
   }
   for (const dir of entries) {
-    const skillMd = join(skillsRoot, dir, 'SKILL.md');
+    const skillDir = join(skillsRoot, dir);
+    const skillMd = join(skillDir, 'SKILL.md');
     try {
       const md = await fs.readFile(skillMd, 'utf-8');
       const fmName = md.match(/^name:\s*["']?([a-z0-9][a-z0-9-]*)["']?\s*$/m)?.[1];
       if (dir === name || fmName === name) {
-        return md;
+        // 附带可 Read 的细则路径，避免模型误读工作区根目录 references/
+        let refHint = '';
+        try {
+          const refDir = join(skillDir, 'references');
+          const refs = (await fs.readdir(refDir)).filter((f) => f.endsWith('.md'));
+          if (refs.length > 0) {
+            const lines = refs.map((f) => `- .claude/skills/${dir}/references/${f}`);
+            refHint = `\n\n---\n本技能细则文件（Read 时必须用下列工作区相对路径，禁止读工作区根下的 references/）：\n${lines.join('\n')}`;
+          }
+        } catch {
+          // 无 references 目录则忽略
+        }
+        return `${md}${refHint}`;
       }
     } catch {
       continue;

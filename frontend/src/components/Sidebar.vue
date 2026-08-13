@@ -111,6 +111,7 @@
                 <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
               </svg>
               <span class="space-name">{{ space.name }}</span>
+              <span v-if="space.examProfile?.enabled" class="exam-badge">备考</span>
               <div class="space-trailing has-delete">
                 <span
                   class="space-task-count"
@@ -162,6 +163,13 @@
               <div v-if="sessionsInSpace(space).length === 0" class="empty-nested">暂无任务</div>
             </div>
           </div>
+          <button class="new-project-row" @click="showExamDialog = true">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+            </svg>
+            <span>新建备考项目</span>
+          </button>
           <button class="new-project-row" @click="handleCreateSpace">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -372,6 +380,7 @@
     </div>
 
     <SettingsDialog v-model="showSettings" />
+    <CreateExamProfileDialog v-model:visible="showExamDialog" />
   </div>
 </template>
 
@@ -384,12 +393,15 @@ import { useUiStore } from '@/stores/ui';
 import { useFileTranscription } from '@/composables/useFileTranscription';
 import { ElMessage } from 'element-plus';
 import SettingsDialog from './SettingsDialog.vue';
+import CreateExamProfileDialog from './CreateExamProfileDialog.vue';
 import FootprintPanel from './FootprintPanel.vue';
+import { useExamProfileStore } from '@/stores/examProfile';
 import type { Session, WorkspaceSpace } from '@shared/types';
 
 const chatStore = useChatStore();
 const sessionsStore = useSessionsStore();
 const spaceStore = useSpaceStore();
+const examStore = useExamProfileStore();
 const uiStore = useUiStore();
 const {
   activeTask: transcriptionTask,
@@ -436,6 +448,7 @@ const isOnDefaultSpace = computed(
 const currentSessionId = computed(() => chatStore.currentSessionId);
 const activeView = computed(() => uiStore.activeView);
 const showSettings = ref(false);
+const showExamDialog = ref(false);
 const spacesExpanded = ref(true);
 const recentExpanded = ref(true);
 const footprintExpanded = ref(true);
@@ -657,6 +670,7 @@ onMounted(async () => {
     spaceStore.loadSpaces(),
     chatStore.loadExternalTasks()
   ]);
+  await examStore.loadSyllabusForActiveSpace();
   if (!chatStore.workspacePath || !chatStore.spaceId) {
     useDefaultSpace();
   }
@@ -981,6 +995,16 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+.exam-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-accent-text, var(--color-accent));
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
 }
 
 .space-trailing {

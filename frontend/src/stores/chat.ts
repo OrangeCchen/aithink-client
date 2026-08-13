@@ -42,7 +42,9 @@ function loadDispatchMode(): 'local' | 'external' {
   if (typeof localStorage === 'undefined') return 'local';
   const saved = localStorage.getItem(DISPATCH_MODE_STORAGE_KEY);
   if (saved === 'external') return 'external';
-  return loadDispatchTarget() === 'local' ? 'local' : 'external';
+  if (saved === 'local') return 'local';
+  // 未显式设置过时默认本机对话（不再跟随旧的 dispatchTarget）
+  return 'local';
 }
 
 function loadExternalAppTargets(): ExternalAppId[] {
@@ -65,6 +67,9 @@ function loadExternalAppTargets(): ExternalAppId[] {
 import { useSessionsStore } from './sessions';
 import { useSpaceStore } from './space';
 import { useQuestionStore } from './question';
+import { useExamProfileStore } from './examProfile';
+import type { Session } from '@shared/types';
+import type { ComposerAttachedSkill } from '@shared/skill-types';
 
 export const useChatStore = defineStore('chat', {
   state: () => ({
@@ -84,6 +89,8 @@ export const useChatStore = defineStore('chat', {
     streamPhase: null as string | null,
     // 待回填到输入框的文本（如从技能市场"立即使用"跳转过来）
     pendingInput: '' as string,
+    // 从技能中心带回输入框、等待以胶囊形式挂载的技能
+    pendingSkill: null as ComposerAttachedSkill | null,
     // 外部任务列表(mock 阶段存前端,后续迁到后端)
     externalTasks: [] as ExternalTask[],
     // 当前会话等待的外部任务 ID 列表
@@ -157,8 +164,15 @@ export const useChatStore = defineStore('chat', {
         .catch((err: any) => console.error('persist messages failed:', err));
     },
 
-    async sendMessage(prompt: string, model: string, images?: string[]) {
+    async sendMessage(
+      prompt: string,
+      model: string,
+      images?: string[],
+      displayPrompt?: string,
+      attachedSkill?: Message['attachedSkill']
+    ) {
       const spaceStore = useSpaceStore();
+      const examStore = useExamProfileStore();
       const spaceId = this.spaceId || spaceStore.activeSpaceId || undefined;
       const workspacePath =
         this.workspacePath ||
@@ -169,8 +183,9 @@ export const useChatStore = defineStore('chat', {
         id: Date.now().toString(),
         sessionId: this.currentSessionId || '',
         role: 'user',
-        content: prompt,
+        content: displayPrompt ?? prompt,
         images: images && images.length > 0 ? images : undefined,
+        attachedSkill: attachedSkill || undefined,
         timestamp: Date.now()
       };
       this.messages.push(userMessage);
@@ -197,10 +212,13 @@ export const useChatStore = defineStore('chat', {
         const result = await window.electronAPI.invoke('agent:query', {
           sessionId: this.currentSessionId,
           prompt,
+          displayPrompt,
+          attachedSkill,
           images,
           model,
           workspacePath,
-          spaceId
+          spaceId,
+          syllabusNodeId: examStore.activeSyllabusNodeId || undefined
         });
 
         if (!this.currentSessionId) {
@@ -319,10 +337,47 @@ export const useChatStore = defineStore('chat', {
       this.streamDispatchTasks = null;
       this.currentToolCalls = [];
 
+      const examStore = useExamProfileStore();
+      const sessionsStore = useSessionsStore();
+
+      const applySessionMeta = async (info?: Session | null) => {
+        if (info?.syllabusNodeId) {
+          examStore.restoreFromSession(sessionId, info.syllabusNodeId);
+        } else {
+          examStore.activeSyllabusNodeId = '';
+        }
+        if (info?.workspacePath) this.workspacePath = info.workspacePath;
+        if (info?.spaceId) {
+          this.spaceId = info.spaceId;
+          const spaceStore = useSpaceStore();
+          spaceStore.setActiveSpace(info.spaceId);
+        } else if (info?.workspacePath) {
+          const spaceStore = useSpaceStore();
+          const matched = spaceStore.spaces.find((s) => s.folderPath === info.workspacePath);
+          if (matched) {
+            this.spaceId = matched.id;
+            spaceStore.setActiveSpace(matched.id);
+          } else {
+            await examStore.loadSyllabusForActiveSpace();
+          }
+        } else {
+          await examStore.loadSyllabusForActiveSpace();
+        }
+      };
+
       // 优先读缓存
       const cached = this.sessionMessages[sessionId];
       if (cached) {
         this.messages = [...cached];
+        let info = sessionsStore.sessions.find((s) => s.id === sessionId);
+        if (!info) {
+          try {
+            info = await window.electronAPI.invoke('agent:get-session-info', { sessionId });
+          } catch {
+            info = undefined;
+          }
+        }
+        await applySessionMeta(info);
         return;
       }
 
@@ -334,22 +389,7 @@ export const useChatStore = defineStore('chat', {
         ]);
         this.messages = messages || [];
         this.sessionMessages[sessionId] = [...this.messages];
-        if (info) {
-          if (info.workspacePath) this.workspacePath = info.workspacePath;
-          if (info.spaceId) {
-            this.spaceId = info.spaceId;
-            const spaceStore = useSpaceStore();
-            spaceStore.setActiveSpace(info.spaceId);
-          } else if (info.workspacePath) {
-            // 旧会话：按路径匹配空间
-            const spaceStore = useSpaceStore();
-            const matched = spaceStore.spaces.find((s) => s.folderPath === info.workspacePath);
-            if (matched) {
-              this.spaceId = matched.id;
-              spaceStore.setActiveSpace(matched.id);
-            }
-          }
-        }
+        await applySessionMeta(info);
       } catch (error) {
         console.error('Failed to load session:', error);
       }
@@ -390,6 +430,16 @@ export const useChatStore = defineStore('chat', {
       const text = this.pendingInput;
       this.pendingInput = '';
       return text;
+    },
+
+    setPendingSkill(skill: ComposerAttachedSkill) {
+      this.pendingSkill = skill;
+    },
+
+    consumePendingSkill(): ComposerAttachedSkill | null {
+      const skill = this.pendingSkill;
+      this.pendingSkill = null;
+      return skill;
     },
 
     async viewExternalTask(taskId: string) {
@@ -454,12 +504,14 @@ export const useChatStore = defineStore('chat', {
       workspacePath?: string
     ) {
       if (this.currentSessionId) return;
+      const examStore = useExamProfileStore();
       const session = {
         id: crypto.randomUUID(),
         title: prompt.slice(0, 30),
         model,
         workspacePath: workspacePath || '',
         spaceId,
+        syllabusNodeId: examStore.activeSyllabusNodeId || undefined,
         createdAt: Date.now()
       };
       this.currentSessionId = session.id;
@@ -471,7 +523,7 @@ export const useChatStore = defineStore('chat', {
     },
 
     /** 派发按钮：将当前输入派发到选中的一个或多个外部 App */
-    async dispatchToExternalApp(prompt: string, model: string) {
+    async dispatchToExternalApp(prompt: string, model: string, displayPrompt?: string) {
       const apps =
         this.externalAppTargets.length > 0
           ? [...this.externalAppTargets]
@@ -493,7 +545,7 @@ export const useChatStore = defineStore('chat', {
         id: Date.now().toString(),
         sessionId,
         role: 'user',
-        content: prompt,
+        content: displayPrompt ?? prompt,
         timestamp: Date.now()
       };
       this.pushMessageTo(sessionId, userMessage);

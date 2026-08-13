@@ -1,5 +1,54 @@
 // 共享类型定义（主进程和渲染进程共用）
 
+/** 考纲树节点（ExamProfile 用，任意考试可复用） */
+export interface SyllabusNode {
+  id: string;
+  title: string;
+  /** notes/ 下的目录名，如 01-综合知识 */
+  slug: string;
+  children?: SyllabusNode[];
+}
+
+/** 备考项目元数据（挂在 WorkspaceSpace 上；考纲以目录内 syllabus.json 为准） */
+export interface ExamProfileMeta {
+  enabled: boolean;
+  /** 遗留字段，新数据不再写入 */
+  templateId?: string;
+}
+
+/** 沉淀来源类型 */
+export type DepositionSourceType =
+  | 'local-llm'
+  | 'external-summary'
+  | 'transcription'
+  | 'manual';
+
+export interface DepositionSource {
+  type: DepositionSourceType;
+  apps?: string[];
+}
+
+/** 写入 notes/ 的请求 */
+export interface DeposeNoteParams {
+  spaceId: string;
+  /** 已有章节 id；与 newChapterTitle 二选一 */
+  syllabusNodeId?: string;
+  /** 考纲为空或新建章节时，从对话提炼的章节名 */
+  newChapterTitle?: string;
+  title: string;
+  content: string;
+  sessionId: string;
+  sources: DepositionSource[];
+}
+
+export interface DeposeNoteResult {
+  ok: boolean;
+  path?: string;
+  relativePath?: string;
+  syllabusNodeId?: string;
+  error?: string;
+}
+
 /** 工作空间：命名容器，绑定本地文件夹，其下挂任务（会话） */
 export interface WorkspaceSpace {
   id: string;
@@ -9,6 +58,8 @@ export interface WorkspaceSpace {
   updatedAt: number;
   /** 系统默认空间，不可删除 */
   isDefault?: boolean;
+  /** 备考项目：启用后显示考纲与沉淀能力 */
+  examProfile?: ExamProfileMeta;
 }
 
 /** 空间目录中的文件/文件夹条目（产物列表） */
@@ -28,6 +79,8 @@ export interface Session {
   workspacePath: string;
   /** 所属空间；旧数据可无 */
   spaceId?: string;
+  /** 学习会话绑定的考纲章节 id */
+  syllabusNodeId?: string;
   createdAt: number;
   source?: 'desktop' | 'extension';
   sourceMeta?: {
@@ -80,6 +133,12 @@ export interface Message {
    * 用户消息携带的图片（base64 data URL 或 file:// 路径）
    */
   images?: string[];
+  /** 用户消息挂载的技能（输入框胶囊发送后保留展示） */
+  attachedSkill?: {
+    slug: string;
+    name: string;
+    skillName?: string;
+  };
 }
 
 export interface ToolCall {

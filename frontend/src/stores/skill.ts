@@ -57,7 +57,8 @@ export const useSkillStore = defineStore('skill', {
           if (!q) return true;
           return (
             item.name.toLowerCase().includes(q) ||
-            item.slug.toLowerCase().includes(q)
+            item.slug.toLowerCase().includes(q) ||
+            (item.description || '').toLowerCase().includes(q)
           );
         })
         .map((item) => {
@@ -66,7 +67,7 @@ export const useSkillStore = defineStore('skill', {
           return {
             slug: item.slug,
             name: item.name,
-            description: '已安装技能',
+            description: item.description || '已安装技能',
             iconUrl: '',
             category: '',
             subCategories: [],

@@ -8,6 +8,8 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     ArtifactTree: typeof import('./src/components/ArtifactTree.vue')['default']
+    CreateExamProfileDialog: typeof import('./src/components/CreateExamProfileDialog.vue')['default']
+    DepositionBar: typeof import('./src/components/DepositionBar.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElButton: typeof import('element-plus/es')['ElButton']
     ElDialog: typeof import('element-plus/es')['ElDialog']
@@ -20,6 +22,7 @@ declare module 'vue' {
     ElTabs: typeof import('element-plus/es')['ElTabs']
     FootprintPanel: typeof import('./src/components/FootprintPanel.vue')['default']
     InputBar: typeof import('./src/components/InputBar.vue')['default']
+    LearningContextBar: typeof import('./src/components/LearningContextBar.vue')['default']
     MessageBubble: typeof import('./src/components/MessageBubble.vue')['default']
     QuestionPanel: typeof import('./src/components/QuestionPanel.vue')['default']
     QuickPolishPanel: typeof import('./src/components/QuickPolishPanel.vue')['default']

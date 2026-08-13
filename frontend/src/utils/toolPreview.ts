@@ -7,6 +7,9 @@ const FRIENDLY_TOOL_NAMES: Record<string, string> = {
   AskUserQuestion: '准备问题'
 };
 
+/** 超过该字节数视为「大段返回」，在过程里单独提示 */
+export const LARGE_TOOL_OUTPUT_BYTES = 2_000;
+
 export function friendlyToolName(name: string): string {
   return FRIENDLY_TOOL_NAMES[name] || name;
 }
@@ -57,4 +60,47 @@ export function formatToolOutputPreview(output: string | undefined, maxLen = 160
   const text = output.trim().replace(/\s+/g, ' ');
   if (text.length <= maxLen) return text;
   return `${text.slice(0, maxLen)}…`;
+}
+
+function utf8ByteLength(text: string): number {
+  if (typeof TextEncoder !== 'undefined') {
+    return new TextEncoder().encode(text).length;
+  }
+  return text.length;
+}
+
+function formatByteSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+  if (bytes >= 1024) return `${Math.max(1, Math.round(bytes / 1024))}KB`;
+  return `${bytes}B`;
+}
+
+function detectPayloadKind(output: string): string {
+  const head = output.trimStart().slice(0, 800);
+  if (/<!DOCTYPE\s+html|<html[\s>]/i.test(head)) return 'HTML';
+  if (/^\s*[\[{]/.test(head)) return 'JSON';
+  if (/^https?:\/\//i.test(head) && head.length < 500) return '链接';
+  return '文本';
+}
+
+/** 大段工具返回的一行说明（小内容返回空串） */
+export function describeToolPayload(output?: string): string {
+  if (!output?.trim()) return '';
+  const bytes = utf8ByteLength(output);
+  if (bytes < LARGE_TOOL_OUTPUT_BYTES) return '';
+  const kind = detectPayloadKind(output);
+  return `返回 ${kind} 约 ${formatByteSize(bytes)}，已纳入下一轮模型上下文`;
+}
+
+export function isLargeToolOutput(output?: string): boolean {
+  if (!output?.trim()) return false;
+  return utf8ByteLength(output) >= LARGE_TOOL_OUTPUT_BYTES;
+}
+
+/** 展开查看用：保留换行的摘要 */
+export function formatToolOutputBlock(output?: string, maxLen = 1600): string {
+  if (!output?.trim()) return '';
+  const text = output.trim().replace(/\r\n/g, '\n');
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, maxLen)}\n…`;
 }

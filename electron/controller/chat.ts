@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow } from 'electron';
 import { randomUUID } from 'crypto';
 import { getDatabase, defaultWorkspacePath } from '../service/database.js';
 import { startQuery, cancelQuery, resolveAskUserQuestion } from '../service/agent-sdk.js';
+import { buildConversationHistory } from '../service/agent/conversation-history.js';
 import type {
   Session,
   Message,
@@ -16,12 +17,25 @@ export async function registerChatHandlers() {
   ipcMain.handle('agent:query', async (_event, params: {
     sessionId?: string;
     prompt: string;
+    displayPrompt?: string;
+    attachedSkill?: Message['attachedSkill'];
     images?: string[];
     model: string;
     workspacePath?: string;
     spaceId?: string;
+    syllabusNodeId?: string;
   }) => {
-    const { sessionId: existingSessionId, prompt, images, model, workspacePath, spaceId } = params;
+    const {
+      sessionId: existingSessionId,
+      prompt,
+      displayPrompt,
+      attachedSkill,
+      images,
+      model,
+      workspacePath,
+      spaceId,
+      syllabusNodeId
+    } = params;
 
     const resolvedWorkspace =
       workspacePath ||
@@ -33,10 +47,13 @@ export async function registerChatHandlers() {
       sessionId = randomUUID();
       const session: Session = {
         id: sessionId,
-        title: prompt.slice(0, 30) + (prompt.length > 30 ? '...' : ''),
+        title:
+          (displayPrompt || prompt).slice(0, 30) +
+          ((displayPrompt || prompt).length > 30 ? '...' : ''),
         model,
         workspacePath: resolvedWorkspace,
         spaceId,
+        syllabusNodeId,
         createdAt: Date.now()
       };
       await db.createSession(session);
@@ -46,10 +63,17 @@ export async function registerChatHandlers() {
       id: randomUUID(),
       sessionId,
       role: 'user',
-      content: prompt,
+      content: displayPrompt || prompt,
+      images: images?.length ? images : undefined,
+      attachedSkill: attachedSkill || undefined,
       timestamp: Date.now()
     };
     await db.createMessage(userMessage);
+
+    const history = buildConversationHistory(db.getMessages(sessionId), {
+      prompt,
+      images
+    });
 
     const assistantMessageId = randomUUID();
     let assistantContent = '';
@@ -58,6 +82,7 @@ export async function registerChatHandlers() {
     startQuery(sessionId, {
       prompt,
       images,
+      history,
       model,
       workspacePath: resolvedWorkspace,
       onEvent: async (streamEvent) => {

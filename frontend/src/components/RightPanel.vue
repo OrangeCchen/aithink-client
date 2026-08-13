@@ -1,33 +1,23 @@
 <template>
   <div class="right-panel">
     <div class="rp-tabs">
-      <button class="rp-tab" :class="{ active: activeTab === 'artifacts' }" @click="activeTab = 'artifacts'">
-        产物
-      </button>
-      <button
-        v-if="hasPending"
-        class="rp-tab"
-        :class="{ active: activeTab === 'questions', pulse: activeTab !== 'questions' }"
-        @click="activeTab = 'questions'"
-      >
-        问题
-        <span class="badge">{{ pendingCount }}</span>
+      <button class="rp-tab active">
+        {{ isExamNotesMode ? '本章语料' : '产物' }}
       </button>
     </div>
 
     <div class="rp-body">
-      <QuestionPanel v-if="activeTab === 'questions' && hasPending" />
-      <div v-else class="tab-pane artifacts-pane">
+      <div class="tab-pane artifacts-pane">
         <div class="art-header">
-          <div class="art-path" :title="folderPath">{{ shortPath(folderPath) || '未选择空间' }}</div>
+          <div class="art-path" :title="panelPathTitle">{{ panelPathLabel }}</div>
           <div class="art-actions">
-            <button class="art-btn" title="刷新" :disabled="!folderPath || filesLoading" @click="refreshFiles">
+            <button class="art-btn" title="刷新" :disabled="!canRefresh || filesLoading" @click="refreshFiles">
               <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="23 4 23 10 17 10"></polyline>
                 <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
               </svg>
             </button>
-            <button class="art-btn" title="在访达中打开空间根目录" :disabled="!folderPath" @click="openFolder">
+            <button class="art-btn" title="在访达中打开" :disabled="!openPath" @click="openFolder">
               <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M5 4h5l2 2h9a1 1 0 0 1 1 1v2H4V5a1 1 0 0 1 1-1z"></path>
                 <path d="M4 10h16l-1.2 8.2A1 1 0 0 1 17.8 19H6.2a1 1 0 0 1-1-0.8L4 10z"></path>
@@ -39,10 +29,16 @@
         <div v-if="!folderPath" class="art-empty">
           请先在左侧或输入框选择工作空间
         </div>
+        <div v-else-if="examStore.isSyllabusEmpty" class="art-empty">
+          考纲尚空。对话后点「沉淀」，填写章节名即可开始积累语料
+        </div>
+        <div v-else-if="examStore.isExamMode && !examStore.activeSyllabusNodeId" class="art-empty">
+          未选章节时，沉淀笔记会创建或归入对应章节
+        </div>
         <div v-else-if="filesLoading" class="art-empty">加载中…</div>
         <div v-else-if="filesError" class="art-empty error">{{ filesError }}</div>
         <div v-else-if="files.length === 0" class="art-empty">
-          Agent 写入本空间的文件会出现在这里
+          {{ isExamNotesMode ? '本章还没有沉淀笔记，对话后可点击「沉淀」写入' : 'Agent 写入本空间的文件会出现在这里' }}
         </div>
         <ArtifactTree v-else :files="files" @open="onOpenEntry" />
       </div>
@@ -51,28 +47,43 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
-import QuestionPanel from './QuestionPanel.vue';
+import { computed, onMounted, watch } from 'vue';
 import ArtifactTree from './ArtifactTree.vue';
-import { useQuestionStore } from '@/stores/question';
 import { useSpaceStore } from '@/stores/space';
 import { useChatStore } from '@/stores/chat';
+import { useExamProfileStore } from '@/stores/examProfile';
 import { ElMessage } from 'element-plus';
 
-const questionStore = useQuestionStore();
 const spaceStore = useSpaceStore();
 const chatStore = useChatStore();
+const examStore = useExamProfileStore();
 
-const activeTab = ref<'questions' | 'artifacts'>('artifacts');
-
-const hasPending = computed(() => questionStore.hasPending);
-const pendingCount = computed(() => questionStore.pending?.questions.length || 0);
-const files = computed(() => spaceStore.files);
-const filesLoading = computed(() => spaceStore.filesLoading);
-const filesError = computed(() => spaceStore.filesError);
+const isExamNotesMode = computed(
+  () => examStore.isExamMode && Boolean(examStore.activeNode)
+);
+const files = computed(() =>
+  isExamNotesMode.value ? examStore.chapterNotes : spaceStore.files
+);
+const filesLoading = computed(() =>
+  isExamNotesMode.value ? examStore.chapterNotesLoading : spaceStore.filesLoading
+);
+const filesError = computed(() =>
+  isExamNotesMode.value ? examStore.chapterNotesError : spaceStore.filesError
+);
 const folderPath = computed(
   () => chatStore.workspacePath || spaceStore.activeFolderPath || ''
 );
+const canRefresh = computed(() => {
+  if (!folderPath.value) return false;
+  if (examStore.isExamMode) return Boolean(examStore.activeSyllabusNodeId);
+  return true;
+});
+const openPath = computed(() => {
+  if (isExamNotesMode.value && examStore.activeNode) {
+    return `${folderPath.value}/notes/${examStore.activeNode.slug}`;
+  }
+  return folderPath.value;
+});
 
 const shortPath = (path: string) => {
   if (!path) return '';
@@ -81,13 +92,29 @@ const shortPath = (path: string) => {
   return path;
 };
 
+const panelPathTitle = computed(() => {
+  if (isExamNotesMode.value && examStore.activeNode) {
+    return `${folderPath.value}/notes/${examStore.activeNode.slug}`;
+  }
+  return folderPath.value;
+});
+
+const panelPathLabel = computed(() => {
+  if (isExamNotesMode.value) return `本章语料 · ${examStore.activeNodeLabel}`;
+  return shortPath(folderPath.value) || '未选择空间';
+});
+
 const refreshFiles = () => {
+  if (isExamNotesMode.value) {
+    void examStore.loadChapterNotesForPanel();
+    return;
+  }
   if (folderPath.value) spaceStore.loadFiles(folderPath.value);
 };
 
 const openFolder = async () => {
-  if (!folderPath.value) return;
-  const result = await spaceStore.revealPath(folderPath.value);
+  if (!openPath.value) return;
+  const result = await spaceStore.revealPath(openPath.value);
   if (!result?.success) ElMessage.error(result?.error || '无法打开');
 };
 
@@ -97,35 +124,30 @@ const onOpenEntry = async (path: string, _isDir: boolean) => {
 };
 
 watch(
-  () => questionStore.focusQuestions,
-  (v) => {
-    if (v && questionStore.hasPending) {
-      activeTab.value = 'questions';
-      questionStore.focusQuestions = false;
-    }
-  }
-);
-
-watch(hasPending, (v) => {
-  if (v) {
-    activeTab.value = 'questions';
-  } else if (activeTab.value === 'questions') {
-    // 答完后隐藏「问题」页签，回到产物
-    activeTab.value = 'artifacts';
-  }
-});
-
-watch(
-  () => [activeTab.value, folderPath.value] as const,
-  ([tab, path]) => {
-    if (tab === 'artifacts' && path) refreshFiles();
+  () =>
+    [
+      folderPath.value,
+      examStore.isExamMode,
+      examStore.activeSyllabusNodeId
+    ] as const,
+  () => {
+    refreshFiles();
   }
 );
 
 watch(
   () => chatStore.streaming,
   (streaming, was) => {
-    if (was && !streaming && activeTab.value === 'artifacts') {
+    if (was && !streaming) {
+      refreshFiles();
+    }
+  }
+);
+
+watch(
+  () => examStore.lastHighlightPath,
+  () => {
+    if (isExamNotesMode.value) {
       refreshFiles();
     }
   }

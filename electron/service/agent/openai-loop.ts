@@ -3,12 +3,15 @@ import { randomUUID } from 'crypto';
 import type { StreamEvent } from '../../../shared/types.js';
 import { buildSystemPrompt, syncAndListSkills } from './skills-context.js';
 import { runTool, toOpenAITools, type ToolContext } from './tools.js';
+import type { HistoryTurn } from './conversation-history.js';
 
 export interface OpenAILoopOptions {
   sessionId: string;
   prompt: string;
   /** data URL 列表，如 data:image/png;base64,... */
   images?: string[];
+  /** 多轮历史（含当前 user）；缺省时仅用 prompt */
+  history?: HistoryTurn[];
   model: string;
   apiKey: string;
   baseUrl: string;
@@ -115,6 +118,26 @@ function joinUrl(base: string, path: string): string {
   return `${b}/${path}`;
 }
 
+function historyToOpenAIMessages(
+  history: HistoryTurn[] | undefined,
+  fallbackPrompt: string,
+  fallbackImages?: string[]
+): ChatMessage[] {
+  const turns =
+    history && history.length > 0
+      ? history
+      : [{ role: 'user' as const, content: fallbackPrompt, images: fallbackImages }];
+  return turns.map((turn) => {
+    if (turn.role === 'assistant') {
+      return { role: 'assistant' as const, content: turn.content };
+    }
+    return {
+      role: 'user' as const,
+      content: buildUserContent(turn.content, turn.images)
+    };
+  });
+}
+
 export async function runOpenAICompatibleLoop(opts: OpenAILoopOptions): Promise<void> {
   emitPhase(opts, 'syncing_skills');
   const skills = await syncAndListSkills(opts.workspacePath);
@@ -122,7 +145,7 @@ export async function runOpenAICompatibleLoop(opts: OpenAILoopOptions): Promise<
   const tools = toOpenAITools();
   const messages: ChatMessage[] = [
     { role: 'system', content: system },
-    { role: 'user', content: buildUserContent(opts.prompt, opts.images) }
+    ...historyToOpenAIMessages(opts.history, opts.prompt, opts.images)
   ];
 
   const toolCtx: ToolContext = {

@@ -8,6 +8,7 @@ import { ORIGIN_LABELS } from '../../shared/skill-types.js';
 /** SkillHub slug / 命名空间命中即视为官方 */
 export const AITHINK_OFFICIAL_SLUGS = new Set<string>([
   'business-skill-builder',
+  'civil-servant-review',
   'meeting-to-todos',
   'browser-footprint-summary'
 ]);
@@ -20,12 +21,23 @@ export const AITHINK_OFFICIAL_SEEDS: OfficialSkillSeed[] = [
     slug: 'business-skill-builder',
     name: '场景技能工坊',
     description:
-      '通过业务场景访谈，把重复工作流沉淀为可复用技能。先梳理流程与工具依赖，再生成可安装的 Skill。',
+      '访谈业务场景，沉淀为可安装、可复用的工作流技能。',
     category: 'productivity',
     tags: ['技能创建', '业务访谈'],
     version: '1.0.0',
     installable: true,
     skillName: 'business-skill-builder'
+  },
+  {
+    slug: 'civil-servant-review',
+    name: '公务员场景审校',
+    description:
+      '审演示脚本与建设内容是否像公务员真实办公，给出依据与机关/公开案例参照。',
+    category: 'productivity',
+    tags: ['公务员', '场景审校', '演示话术'],
+    version: '1.0.0',
+    installable: true,
+    skillName: 'civil-servant-review'
   },
   {
     slug: 'meeting-to-todos',

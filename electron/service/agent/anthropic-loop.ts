@@ -3,11 +3,14 @@ import { randomUUID } from 'crypto';
 import type { StreamEvent } from '../../../shared/types.js';
 import { buildSystemPrompt, syncAndListSkills } from './skills-context.js';
 import { runTool, toAnthropicTools, type ToolContext } from './tools.js';
+import type { HistoryTurn } from './conversation-history.js';
 
 export interface AnthropicLoopOptions {
   sessionId: string;
   prompt: string;
   images?: string[];
+  /** 多轮历史（含当前 user）；缺省时仅用 prompt */
+  history?: HistoryTurn[];
   model: string;
   apiKey: string;
   baseUrl: string;
@@ -45,20 +48,13 @@ function emitPhase(opts: AnthropicLoopOptions, phase: string): void {
   opts.emit({ type: 'phase', sessionId: opts.sessionId, data: { phase } });
 }
 
-export async function runAnthropicLoop(opts: AnthropicLoopOptions): Promise<void> {
-  emitPhase(opts, 'syncing_skills');
-  const skills = await syncAndListSkills(opts.workspacePath);
-  const system = buildSystemPrompt(skills);
-  const tools = toAnthropicTools();
-
-  // 构造初始用户消息：文本 + 图片
-  const initialContent: ContentBlock[] = [];
-  if (opts.images && opts.images.length > 0) {
-    for (const imgDataUrl of opts.images) {
-      // data:image/png;base64,iVBORw... -> { type: 'base64', media_type: 'image/png', data: '...' }
+function buildAnthropicUserContent(text: string, images?: string[]): ContentBlock[] {
+  const blocks: ContentBlock[] = [];
+  if (images && images.length > 0) {
+    for (const imgDataUrl of images) {
       const match = imgDataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
       if (match) {
-        initialContent.push({
+        blocks.push({
           type: 'image',
           source: {
             type: 'base64',
@@ -69,9 +65,37 @@ export async function runAnthropicLoop(opts: AnthropicLoopOptions): Promise<void
       }
     }
   }
-  initialContent.push({ type: 'text', text: opts.prompt });
+  blocks.push({ type: 'text', text });
+  return blocks;
+}
 
-  const messages: Msg[] = [{ role: 'user', content: initialContent }];
+function historyToAnthropicMessages(
+  history: HistoryTurn[] | undefined,
+  fallbackPrompt: string,
+  fallbackImages?: string[]
+): Msg[] {
+  const turns =
+    history && history.length > 0
+      ? history
+      : [{ role: 'user' as const, content: fallbackPrompt, images: fallbackImages }];
+  return turns.map((turn) => {
+    if (turn.role === 'assistant') {
+      return { role: 'assistant' as const, content: turn.content };
+    }
+    return {
+      role: 'user' as const,
+      content: buildAnthropicUserContent(turn.content, turn.images)
+    };
+  });
+}
+
+export async function runAnthropicLoop(opts: AnthropicLoopOptions): Promise<void> {
+  emitPhase(opts, 'syncing_skills');
+  const skills = await syncAndListSkills(opts.workspacePath);
+  const system = buildSystemPrompt(skills);
+  const tools = toAnthropicTools();
+
+  const messages: Msg[] = historyToAnthropicMessages(opts.history, opts.prompt, opts.images);
 
   const toolCtx: ToolContext = {
     sessionId: opts.sessionId,
